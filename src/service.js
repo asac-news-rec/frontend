@@ -18,3 +18,16 @@ export async function getFeed(readerId,category,mode='normal') {
   return mode==='empty'?{...feed,items:[]}:feed;
 }
 export function getArticle(id) {return articles.find(article=>article.id===id)??null;}
+
+export async function getCategories() {
+  const response = await fetch('/api/v1/categories', {cache:'no-store'});
+  if (!response.ok) throw new Error('카테고리를 불러오지 못했어요. 다시 시도해 주세요.');
+  const payload = await response.json();
+  if (!Array.isArray(payload.data) || !payload.data.length || payload.data.some(value => typeof value !== 'string' || !value.trim())) throw new Error('카테고리 응답 형식이 올바르지 않습니다.');
+  return [...new Set(payload.data)];
+}
+export async function getFeedPage(readerId, category, mode='normal', offset=0, limit=3) {
+  const feed = await getFeed(readerId, category, mode);
+  const items = feed.items.slice(offset, offset + limit);
+  return {...feed, items, nextOffset:offset + items.length < feed.items.length ? offset + items.length : null};
+}

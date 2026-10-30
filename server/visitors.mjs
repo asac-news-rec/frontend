@@ -1,0 +1,48 @@
+import {DatabaseSync} from 'node:sqlite';
+import {randomBytes, randomUUID, createHash} from 'node:crypto';
+import {mkdirSync} from 'node:fs';
+import path from 'node:path';
+
+export const lifetimeSeconds = 30 * 24 * 60 * 60;
+const hash = token => createHash('sha256').update(token).digest('hex');
+
+export function openVisitors(database, now = Date.now) {
+  mkdirSync(path.dirname(database), {recursive:true});
+  const db = new DatabaseSync(database);
+  db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
+    CREATE TABLE IF NOT EXISTS visitors (
+      token_hash TEXT PRIMARY KEY, reader_id TEXT NOT NULL UNIQUE,
+      created_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL
+    );`);
+  if (db.prepare('PRAGMA table_info(visitors)').all().some(column => column.name === 'interests')) db.exec('ALTER TABLE visitors DROP COLUMN interests');
+  const prune = () => db.prepare('DELETE FROM visitors WHERE expires_at <= ?').run(now());
+  prune();
+  function find(token) {
+    if (!token || !/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
+    return db.prepare('SELECT * FROM visitors WHERE token_hash = ? AND expires_at > ?').get(hash(token), now()) || null;
+  }
+  function profile(row) {
+    return {reader_id:row.reader_id, reader_type:'anonymous',
+      created_at:new Date(row.created_at).toISOString(), last_seen_at:new Date(row.last_seen_at).toISOString(),
+      expires_at:new Date(row.expires_at).toISOString()};
+  }
+  return {
+    find, profile,
+    bootstrap(token) {
+      prune();
+      let row = find(token);
+      const isNew = !row;
+      if (!row) {
+        token = randomBytes(32).toString('base64url');
+        const time = now();
+        db.prepare('INSERT INTO visitors(token_hash, reader_id, created_at, last_seen_at, expires_at) VALUES(?,?,?,?,?)')
+          .run(hash(token), randomUUID(), time, time, time + lifetimeSeconds * 1000);
+      } else db.prepare('UPDATE visitors SET last_seen_at = ? WHERE token_hash = ?').run(now(), row.token_hash);
+      row = find(token);
+      return {token, isNew, data:profile(row)};
+    },
+    remove(token) {if (find(token)) db.prepare('DELETE FROM visitors WHERE token_hash = ?').run(hash(token));},
+    close() {db.close();}
+  };
+}

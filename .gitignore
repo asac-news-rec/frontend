@@ -4,3 +4,7 @@ screenshots/
 .edge-test/
 .browser-test/
 desktop.png
+data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm

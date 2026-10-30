@@ -1,0 +1,16 @@
+.git
+.agents
+.codex
+.aws
+.env
+.env.*
+node_modules
+data
+*.sqlite*
+dist
+docs
+screenshots
+.edge-test
+.browser-test
+*.png
+*.zip

@@ -1,0 +1,23 @@
+{
+  "original_sha256": {
+    "frontend-blueprint-2026-10-31.md": "268c0fe2586409fa28c4de51f202ff84d32c90f070eecd9140907402819917e6",
+    "frontend-blueprint-2026-10-31.html": "ad30020490c1e6f1654d7e403071906894a17989faeedc7a96e50199fda789de"
+  },
+  "technical_sections_preserved": [
+    5,
+    7,
+    6,
+    8,
+    9,
+    10,
+    11,
+    12,
+    1,
+    2,
+    3,
+    4
+  ],
+  "diagrams": 8,
+  "json_examples_validated": 2,
+  "internal_links_valid": true
+}

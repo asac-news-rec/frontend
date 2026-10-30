@@ -19,3 +19,10 @@ test('시연 오류는 거절되고 빈 결과와 복구는 구분된다',async(
   assert.equal((await getFeed('reader-tech','전체','empty')).items.length,0);
   assert.ok((await getFeed('reader-tech','전체','normal')).items.length>0);
 });
+
+import {getFeedPage} from '../src/service.js';
+test('페이지를 끝까지 읽으면 전체 기사가 중복 없이 표시되고 종료된다',async()=>{
+  const ids=[];let offset=0;
+  do {const page=await getFeedPage('reader-tech','전체','normal',offset);ids.push(...page.items.map(item=>item.article.id));offset=page.nextOffset;}while(offset!==null);
+  assert.equal(ids.length,8);assert.equal(new Set(ids).size,8);
+});
