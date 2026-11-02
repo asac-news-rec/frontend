@@ -1,0 +1,30 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtemp,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+import {createNewsServer} from '../server/http.mjs';
+test('좋아요는 방문자별로 저장·재시작 유지·중복 방지·취소·삭제된다',async()=>{
+ const dir=await mkdtemp(path.join(tmpdir(),'news-likes-'));
+ const origin='http://127.0.0.1:4173';let app;let base;
+ const start=async()=>{app=createNewsServer({root:process.cwd(),origin,database:path.join(dir,'test.sqlite')});await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));base=`http://127.0.0.1:${app.server.address().port}`;};
+ const stop=async()=>{await new Promise(resolve=>app.server.close(resolve));app.close();app=null;};
+ const request=(url,cookie,body,source=origin)=>fetch(base+'/api/v1/'+url,{method:body===undefined?'GET':'POST',headers:{Cookie:cookie||'',Origin:source,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
+ const list=async cookie=>(await (await request('likes',cookie)).json()).data;
+ try{await start();
+ assert.equal((await request('likes')).status,401);
+ const bootstrap=await request('visitors/bootstrap','',{});const cookie=bootstrap.headers.get('set-cookie').split(';')[0];
+ assert.equal((await request('likes',cookie,{article_id:'a1',liked:true},'http://evil.test')).status,403);
+ assert.equal((await request('likes',cookie,{article_id:'missing',liked:true})).status,404);
+ assert.equal((await request('likes',cookie,{article_id:'a1',liked:'true'})).status,400);
+ for(let i=0;i<2;i++)assert.equal((await request('likes',cookie,{article_id:'a1',liked:true})).status,200);
+ assert.deepEqual(await list(cookie),['a1']);
+ const personal=(await (await request('feed',cookie)).json()).data;assert.equal(personal.strategy,'liked_categories');assert.ok(personal.items.slice(0,3).every(item=>item.article.category==='IT·과학'));assert.ok(personal.items[0].reason.includes('좋아요'));
+ const second=await request('visitors/bootstrap','',{});const cookieB=second.headers.get('set-cookie').split(';')[0];assert.deepEqual(await list(cookieB),[]);
+ const fresh=(await (await request('feed',cookieB)).json()).data;assert.equal(fresh.strategy,'latest');assert.notEqual(fresh.readerId,personal.readerId);
+ const forged=(await (await request('feed?reader_id='+personal.readerId,cookieB)).json()).data;assert.equal(forged.readerId,fresh.readerId);assert.equal(forged.strategy,'latest');
+ await stop();await start();assert.deepEqual(await list(cookie),['a1']);
+ await request('likes',cookie,{article_id:'a1',liked:false});assert.deepEqual(await list(cookie),[]);
+ await request('likes',cookie,{article_id:'a1',liked:true});await request('visitors/reset',cookie,{});assert.equal((await request('likes',cookie)).status,401);
+ }finally{if(app)await stop();await rm(dir,{recursive:true,force:true});}
+});

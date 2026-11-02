@@ -1,4 +1,5 @@
-import {categories} from '../src/data.js';
+import {createVisitorFeed} from './feed.mjs';
+import {categories,articles} from '../src/data.js';
 import http from 'node:http';
 import {readFile} from 'node:fs/promises';
 import path from 'node:path';
@@ -16,11 +17,19 @@ export function createNewsServer({root, origin, database, now}) {
       if (pathname.startsWith('/api/')) {
         res.setHeader('Cache-Control', 'private, no-store');
         if (req.method === 'GET' && pathname === '/api/v1/categories') return respond(res, 200, {data:categories});
-        const mutations = new Set(['/api/v1/visitors/bootstrap', '/api/v1/visitors/reset']);
+        const mutations = new Set(['/api/v1/visitors/bootstrap', '/api/v1/visitors/reset', '/api/v1/likes']);
         if (req.method !== 'GET' && req.method !== 'POST') return respond(res, 405, {error:'METHOD_NOT_ALLOWED'});
         if (req.method === 'POST' && req.headers.origin !== origin) return respond(res, 403, {error:'ORIGIN_REJECTED'});
         const pairs = (req.headers.cookie || '').split(';').map(part => part.trim()).filter(part => part.startsWith(`${cookieName}=`));
         const token = pairs.length === 1 ? pairs[0].slice(cookieName.length + 1) : null;
+        if (req.method === 'GET' && pathname === '/api/v1/feed') {
+          const row=visitors.find(token);
+          return respond(res,200,{data:createVisitorFeed({readerId:row?.reader_id||null,likedIds:row?visitors.likes(row):[],now:now?now():Date.now()})});
+        }
+        if (req.method === 'GET' && pathname === '/api/v1/likes') {
+          const row=visitors.find(token);
+          return respond(res,row?200:401,row?{data:visitors.likes(row)}:{error:'VISITOR_NOT_FOUND'});
+        }
         if (req.method === 'GET' && pathname === '/api/v1/visitors/me') {
           const row = visitors.find(token);
           return respond(res, row ? 200 : 401, row ? {data:visitors.profile(row)} : {error:'VISITOR_NOT_FOUND'});
@@ -37,8 +46,15 @@ export function createNewsServer({root, origin, database, now}) {
         let input;
         try {input = JSON.parse(Buffer.concat(chunks).toString('utf8'));} catch {return respond(res, 400, {error:'INVALID_JSON'});}
         if (!input || Array.isArray(input) || typeof input !== 'object') return respond(res, 400, {error:'INVALID_BODY'});
-        const expectedKeys = [];
+        const expectedKeys = pathname === '/api/v1/likes' ? ['article_id','liked'] : [];
         if (Object.keys(input).some(key => !expectedKeys.includes(key))) return respond(res, 400, {error:'UNKNOWN_FIELD'});
+        if (pathname === '/api/v1/likes') {
+          const row=visitors.find(token);
+          if(!row)return respond(res,401,{error:'VISITOR_NOT_FOUND'});
+          if(typeof input.liked !== 'boolean' || typeof input.article_id !== 'string')return respond(res,400,{error:'INVALID_LIKE'});
+          if(!articles.some(article=>article.id===input.article_id))return respond(res,404,{error:'ARTICLE_NOT_FOUND'});
+          return respond(res,200,{data:visitors.setLike(row,input.article_id,input.liked)});
+        }
         if (pathname.endsWith('/bootstrap')) {
           const result = visitors.bootstrap(token);
           const seconds = Math.max(0, Math.floor((Date.parse(result.data.expires_at) - (now ? now() : Date.now())) / 1000));

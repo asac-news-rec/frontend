@@ -1,7 +1,9 @@
-import {readers} from './data.js';
-import {getFeedPage,getArticle,getCategories} from './service.js';
+import {likeButton,refreshLikes} from './likes.js';
+import {getVisitorFeed,getArticle,getCategories} from './service.js';
 const main=document.querySelector('main');
 let feedScrollY=0;
+let snapshot=[];
+let feedDirty=false;
 let categories=[];
 let observer;
 let nextOffset=null;
@@ -15,23 +17,21 @@ window.addEventListener('scroll',()=>{
 main.addEventListener('click',event=>{
   if(!state.articleId&&event.target.closest('a[data-article]')&&!event.ctrlKey&&!event.metaKey&&!event.shiftKey&&event.button===0)feedScrollY=window.scrollY;
 });
-const state={readerId:readers[0].id,category:'전체',status:'loading',feed:null,articleId:null,mode:'normal',error:'',request:0};
+const state={category:'전체',status:'loading',feed:null,articleId:null,mode:'normal',error:'',request:0};
 const escape=value=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const date=value=>new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',month:'long',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(value));
 const art=(article,extra='')=>`<div class="art art-${article.art} ${extra}" aria-hidden="true"><span class="orb"></span><span class="shape"></span><span class="art-word">${escape(article.category==='IT·과학'?'DISCOVER':article.category==='스포츠'?'MOVE':'EVERYDAY')}</span><span class="art-caption">SAI ORIGINAL · ILLUSTRATION</span></div>`;
-function card(item,index){const a=item.article;return `<a class="card" href="#article/${a.id}" data-article="${a.id}">${art(a)}<div class="card-copy"><div class="eyebrow"><span>${escape(a.category)}</span><span class="fiction">가상 기사</span></div><h3>${escape(a.title)}</h3><p>${escape(a.summary)}</p><div class="article-date"><span class="publisher">${escape(a.publisher)}</span> · ${date(a.publishedAt)}</div><div class="reason"><span>↗</span> ${escape(item.reason)}</div></div></a>`;}
+function card(item,index){const a=item.article;return `<div class="news-row"><a class="card" href="#article/${a.id}" data-article="${a.id}">${art(a)}<div class="card-copy"><div class="eyebrow"><span>${escape(a.category)}</span><span class="fiction">가상 기사</span></div><h3>${escape(a.title)}</h3><p>${escape(a.summary)}</p><div class="article-date"><span class="publisher">${escape(a.publisher)}</span> · ${date(a.publishedAt)}</div><div class="reason"><span>↗</span> ${escape(item.reason)}</div></div></a>${likeButton(a.id)}</div>`;}
 function render(){
   observer?.disconnect();
   if(state.articleId){renderArticle();return;}
-  const reader=readers.find(r=>r.id===state.readerId);
+  const personal=state.feed?.strategy==='liked_categories';
   main.innerHTML=`<section class="intro"><div><div class="overline">YOUR DAILY PERSPECTIVE</div><h1>오늘의 세상,<br><em>나의 관심사</em>로 읽다.</h1><p>새로운 소식과 뜻밖의 발견을 한곳에서 만나보세요.</p></div><div class="intro-aside"><span class="edition">SAI NEWS / FIRST EDITION</span><div class="edition-line"></div><p>하나의 세상,<br>서로 다른 시선.</p><span class="edition">PERSONALIZED READING</span></div></section>
-  <section class="reader-panel" aria-label="가상 독자 선택"><div class="avatar">${reader.isNew?'+':escape(reader.name.slice(0,1))}</div><div class="reader-info"><label for="reader">지금 살펴보는 가상 독자</label><select id="reader">${readers.map(r=>`<option value="${r.id}" ${r.id===reader.id?'selected':''}>${escape(r.name)} · ${escape(r.description)}</option>`).join('')}</select></div><div class="interests"><span>시연용 독자 설정</span><strong>${escape(reader.interests.join(', ')||'아직 없어요')}</strong></div><span class="sample-tag">샘플 피드</span></section>
-  ${reader.isNew?'<aside class="new-reader"><strong>처음 오셨군요. 우선 새로운 소식부터 만나보세요.</strong><span>이용 이력이 없어 가상 기사를 최신순으로 보여드려요.</span></aside>':''}
-  <section class="feed"><div class="feed-heading"><div><span class="overline">FOR YOU</span><h2>${reader.isNew?'새롭게 둘러보는 뉴스':`${escape(reader.name)}님을 위한 뉴스`}</h2></div><button id="refresh" class="refresh">↻ <span>다시 불러오기</span></button></div><div class="feed-meta"><span>미리 구성한 시연 데이터이며 실제 모델의 예측 결과가 아닙니다.</span><span>${state.feed?`목록 생성 · ${date(state.feed.generatedAt)}`:'목록을 준비하고 있어요'}</span></div>
+  <aside class="new-reader"><strong>${personal?'좋아요를 바탕으로 고른 뉴스':'새로운 소식부터 둘러보세요'}</strong><span>${personal?'좋아요한 기사의 카테고리를 먼저 보여드려요.':'좋아요 이력이 없으면 최신순으로 보여드려요.'}</span>${feedDirty?'<span>좋아요가 변경됐어요. 다시 불러오기를 누르면 피드에 반영됩니다.</span>':''}</aside>
+  <section class="feed"><div class="feed-heading"><div><span class="overline">FOR YOU</span><h2>${personal?'나를 위한 뉴스':'최신 뉴스'}</h2></div><button id="refresh" class="refresh">↻ <span>다시 불러오기</span></button></div><div class="feed-meta"><span>기사는 가상 데이터입니다. 추천 순서는 이 브라우저의 좋아요를 참고한 기본 규칙이며 학습 모델은 아닙니다.</span><span>${state.feed?`목록 생성 · ${date(state.feed.generatedAt)}`:'목록을 준비하고 있어요'}</span></div>
   <nav class="categories" aria-label="기사 카테고리">${categories.map(c=>`<button data-category="${escape(c)}" aria-pressed="${state.category===c}" class="${state.category===c?'active':''}">${escape(c)}</button>`).join('')}</nav>
   ${categoryError?`<p role="alert">${escape(categoryError)} <button id="category-retry">다시 시도</button></p>`:''}<div id="results" aria-live="polite" aria-busy="${state.status==='loading'}">${results()}</div></section>
-  <details class="demo"><summary>팀 검토용 · 화면 상태 시연</summary><p>화면 동작만 전환합니다. 피드 상태는 샘플 데이터로 시연합니다. 카테고리는 서버 API에서 불러옵니다.</p><div>${[['normal','기본 화면'],['loading','느린 로딩'],['empty','기사 없음'],['error','조회 실패']].map(([value,label])=>`<button data-mode="${value}" aria-pressed="${state.mode===value}">${label}</button>`).join('')}</div></details>`;
-  main.querySelector('#reader').onchange=e=>{state.readerId=e.target.value;state.feed=null;load();};
+  <details class="demo"><summary>팀 검토용 · 화면 상태 시연</summary><p>화면 동작만 전환합니다. 피드는 서버 API를 사용하며 이 메뉴는 오류·빈 결과 상태를 시연합니다. 카테고리는 서버 API에서 불러옵니다.</p><div>${[['normal','기본 화면'],['loading','느린 로딩'],['empty','기사 없음'],['error','조회 실패']].map(([value,label])=>`<button data-mode="${value}" aria-pressed="${state.mode===value}">${label}</button>`).join('')}</div></details>`;
   main.querySelector('#refresh').onclick=()=>load();
   main.querySelectorAll('[data-category]').forEach(b=>b.onclick=()=>{state.category=b.dataset.category;load();});
   main.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{state.mode=b.dataset.mode;load();});
@@ -66,7 +66,7 @@ async function loadMore(){
   const panel=main.querySelector('#pagination');
   if(panel)panel.innerHTML=pagination();
   try{
-    const page=await getFeedPage(state.readerId,state.category,state.mode,offset);
+    const page={items:snapshot.slice(offset,offset+3),nextOffset:offset+3<snapshot.length?offset+3:null};
     if(token!==state.request)return;
     const known=new Set(state.feed.items.map(item=>item.article.id));
     const added=page.items.filter(item=>!known.has(item.article.id));
@@ -79,7 +79,13 @@ async function loadMore(){
 }
 async function load(){
   const token=++state.request;state.status='loading';nextOffset=null;loadingMore=false;moreError='';render();
-  try{const feed=await getFeedPage(state.readerId,state.category,state.mode);if(token!==state.request)return;state.feed=feed;nextOffset=feed.nextOffset;state.status='ready';}
+  try{
+    if(state.mode==='loading')await new Promise(resolve=>setTimeout(resolve,1800));
+    if(state.mode==='error')throw new Error('조회 실패 시연입니다. 다시 시도해 주세요.');
+    const feed=await getVisitorFeed();if(token!==state.request)return;
+    snapshot=state.mode==='empty'?[]:feed.items.filter(item=>state.category==='전체'||item.article.category===state.category);
+    state.feed={...feed,items:snapshot.slice(0,3)};nextOffset=snapshot.length>3?3:null;feedDirty=false;state.status='ready';
+  }
   catch(error){if(token!==state.request)return;state.status='error';state.error=error.message;}
   render();
 }
@@ -88,7 +94,7 @@ async function initialize(){
   catch(error){categoryError=error.message;state.status='error';state.error=error.message;render();}
 }
 function renderArticle(){const a=getArticle(state.articleId);if(!a){main.innerHTML='<div class="empty"><h1>기사를 찾을 수 없어요</h1><a href="#">뉴스 피드로 돌아가기</a></div>';return;}
-  main.innerHTML=`<article class="article-page"><a class="back" href="#">← 뉴스 피드로 돌아가기</a><div class="eyebrow"><span>${escape(a.category)}</span><span class="fiction">가상 기사</span></div><h1>${escape(a.title)}</h1><p class="article-summary">${escape(a.summary)}</p><div class="byline">${escape(a.publisher)} <span>${date(a.publishedAt)} KST</span></div>${art(a,'article-art')}<p class="illustration-note">기사 내용을 표현한 그래픽 일러스트</p><div class="article-body">${a.body.split('\n\n').map(p=>`<p>${escape(p)}</p>`).join('')}</div><aside class="source-note"><strong>화면 검토용 가상 기사입니다.</strong><p>인물·사건·내용은 창작 예시이며 실제 보도가 아닙니다. 외부 원문과 실제 취재 출처는 없습니다. 클릭과 읽기 시간은 외부로 전송하지 않습니다.</p></aside><a class="back bottom-back" href="#">← 뉴스 피드로 돌아가기</a></article>`;
+  main.innerHTML=`<article class="article-page"><a class="back" href="#">← 뉴스 피드로 돌아가기</a><div class="eyebrow"><span>${escape(a.category)}</span><span class="fiction">가상 기사</span></div><h1>${escape(a.title)}</h1><p class="article-summary">${escape(a.summary)}</p>${likeButton(a.id)}<div class="byline">${escape(a.publisher)} <span>${date(a.publishedAt)} KST</span></div>${art(a,'article-art')}<p class="illustration-note">기사 내용을 표현한 그래픽 일러스트</p><div class="article-body">${a.body.split('\n\n').map(p=>`<p>${escape(p)}</p>`).join('')}</div><aside class="source-note"><strong>화면 검토용 가상 기사입니다.</strong><p>인물·사건·내용은 창작 예시이며 실제 보도가 아닙니다. 외부 원문과 실제 취재 출처는 없습니다. 클릭과 읽기 시간은 외부로 전송하지 않습니다.</p></aside><a class="back bottom-back" href="#">← 뉴스 피드로 돌아가기</a></article>`;
 }
 window.addEventListener('hashchange',()=>{
   const articleId=location.hash.startsWith('#article/')?decodeURIComponent(location.hash.slice(9)):null;
@@ -98,5 +104,9 @@ window.addEventListener('hashchange',()=>{
   main.focus({preventScroll:true});
   requestAnimationFrame(()=>window.scrollTo({top:state.articleId?0:feedScrollY,left:0,behavior:'instant'}));
 });
+window.addEventListener('visitor-changed',()=>{state.feed=null;snapshot=[];feedScrollY=0;load();});
+window.addEventListener('likes-changed',()=>{feedDirty=true;const heading=main.querySelector('.new-reader');if(heading&&!heading.querySelector('[data-dirty]'))heading.insertAdjacentHTML('beforeend','<span data-dirty>좋아요가 변경됐어요. 다시 불러오기를 누르면 피드에 반영됩니다.</span>');});
 state.articleId=location.hash.startsWith('#article/')?decodeURIComponent(location.hash.slice(9)):null;
 initialize();
+
+refreshLikes();

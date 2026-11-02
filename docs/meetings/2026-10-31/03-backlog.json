@@ -1,0 +1,249 @@
+{
+  "schema_version": 1,
+  "meeting_date": "2026-10-31",
+  "prepared_date": "2026-11-02",
+  "timezone": "Asia/Seoul",
+  "status": "planning_draft_not_approved_contract",
+  "implementation_performed": false,
+  "runtime_verification_performed": false,
+  "spec": "02-ai-work-spec.md",
+  "evidence": "04-evidence.md",
+  "priority_definition": {
+    "P0": "첫 연결에 필요한 계약·식별·수집·추천",
+    "P1": "추가 행동과 전체 검증"
+  },
+  "decision_policy": "decision_refs의 해결 여부를 확인한다. 미결정 사항에 의존하지 않는 조사·계약 초안·명시적 mock 준비는 가능하다. 미승인 정책을 확정 동작으로 출시하지 않는다.",
+  "tasks": [
+    {
+      "id": "FE-01",
+      "title": "회의 후 API와 이벤트 계약 개정안 작성",
+      "priority": "P0",
+      "status": "proposal_written_pending_team_agreement",
+      "owner": "김세호와 백엔드·데이터·ML 공동",
+      "depends_on": [],
+      "decision_refs": [
+        "Q01",
+        "Q02",
+        "Q03",
+        "Q07",
+        "Q09",
+        "Q10",
+        "Q11",
+        "Q12"
+      ],
+      "source_refs": [
+        "E01",
+        "E02",
+        "E03",
+        "E04",
+        "E05",
+        "E06"
+      ],
+      "files": [
+        "docs/frontend_backend_contract_v0.1.md"
+      ],
+      "deliverable": "승인 상태를 표시한 계약 개정안과 요청·응답·이벤트 예시",
+      "acceptance": [
+        "23초 체류의 기대 저장값 명시",
+        "전달 20개와 실제 노출 3개를 구분",
+        "언론사 좋아요 대상 ID와 저장·조회·취소 계약 명시",
+        "익명 독자와 synthetic 독자의 권한·출처 구분"
+      ],
+      "proposal": "05-contract-proposal.md"
+    },
+    {
+      "id": "FE-02",
+      "title": "익명 방문자와 피드 문맥 연결",
+      "priority": "P0",
+      "status": "pending_contract",
+      "owner": "김세호, 백엔드 협업",
+      "depends_on": [
+        "FE-01"
+      ],
+      "decision_refs": [
+        "Q09",
+        "Q12"
+      ],
+      "source_refs": [
+        "E02"
+      ],
+      "files": [
+        "src/visitor.js",
+        "src/app.js",
+        "src/service.js"
+      ],
+      "deliverable": "실 방문자와 시연 독자를 구분하는 피드 문맥",
+      "acceptance": [
+        "재방문 시 같은 독자 ID",
+        "쿠키 원문을 프론트에서 읽거나 로그에 저장하지 않음",
+        "삭제·전환 전 이벤트를 새 독자에게 재귀속하지 않음",
+        "수집 안내 문구와 실제 동작 일치"
+      ]
+    },
+    {
+      "id": "FE-03",
+      "title": "실제 노출·클릭과 이벤트 전송 구현",
+      "priority": "P0",
+      "status": "pending_contract",
+      "owner": "김세호, 로깅 담당 협업",
+      "depends_on": [
+        "FE-01",
+        "FE-02"
+      ],
+      "decision_refs": [
+        "Q02",
+        "Q10"
+      ],
+      "source_refs": [
+        "E03",
+        "E04",
+        "E06"
+      ],
+      "files": [
+        "src/app.js",
+        "src/service.js",
+        "src/events.js (new proposed)",
+        "tests/"
+      ],
+      "deliverable": "안정적인 추천 ID를 사용하는 노출·클릭 수집과 배치 전송",
+      "acceptance": [
+        "화면 밖과 숨김 탭의 카드에 실제 노출 없음",
+        "50%와 합의된 지속 시간 경계 검증",
+        "동일 event_id 재시도는 서버에 한 번만 집계",
+        "브라우저 전송을 GCS 5분 파티션과 분리",
+        "키보드·새 탭 동작의 합의 범위 검증"
+      ],
+      "integration_note": "실제 추천 서버 전에는 안정적인 추천 ID를 담은 계약용 mock으로 검증하고 mock임을 표시한다. FE-06에서 교체한다."
+    },
+    {
+      "id": "FE-04",
+      "title": "합의된 체류 측정 규칙 구현",
+      "priority": "P1",
+      "status": "pending_decision",
+      "owner": "김세호, 데이터 담당 협업",
+      "depends_on": [
+        "FE-03"
+      ],
+      "decision_refs": [
+        "Q01"
+      ],
+      "source_refs": [
+        "E02"
+      ],
+      "files": [
+        "src/app.js",
+        "src/events.js (new proposed)",
+        "tests/"
+      ],
+      "deliverable": "활성 체류 측정과 일시정지·종료 처리",
+      "acceptance": [
+        "Q01 결정에 따른 23초 사례 검증",
+        "숨김·포커스 상실 시간 제외",
+        "직접 상세 진입은 피드 클릭 생성 안 함",
+        "종료 전송 누락 가능성과 관측 범위를 문서화"
+      ]
+    },
+    {
+      "id": "FE-05",
+      "title": "언론사 좋아요 UI와 저장 연결",
+      "priority": "P1",
+      "status": "pending_contract",
+      "owner": "김세호, 뉴스 API 담당 미정",
+      "depends_on": [
+        "FE-01",
+        "FE-02"
+      ],
+      "decision_refs": [
+        "Q03",
+        "Q12"
+      ],
+      "source_refs": [
+        "E05"
+      ],
+      "files": [
+        "src/app.js",
+        "src/service.js",
+        "src/style.css",
+        "tests/"
+      ],
+      "deliverable": "publisher_id 기반 저장·취소·재방문 복원 UI",
+      "acceptance": [
+        "서버 저장 성공과 좋아요 상태 일치",
+        "재방문 후 복원",
+        "실패 시 상태 복구와 안내",
+        "반복 입력·재시도 후 최종 상태 일관"
+      ]
+    },
+    {
+      "id": "FE-06",
+      "title": "실제 기사와 추천 API 연결",
+      "priority": "P0",
+      "status": "pending_backend",
+      "owner": "김세호, 기사·ML·뉴스 API 담당 협업",
+      "depends_on": [
+        "FE-01",
+        "FE-02"
+      ],
+      "decision_refs": [
+        "Q04",
+        "Q07",
+        "Q11",
+        "Q12"
+      ],
+      "source_refs": [
+        "E07",
+        "E09",
+        "E10",
+        "E11"
+      ],
+      "files": [
+        "src/service.js",
+        "src/app.js",
+        "tests/"
+      ],
+      "deliverable": "서버 순서와 근거를 보존하는 실제 피드·상세",
+      "acceptance": [
+        "페이지 이동 중 추천 ID·rank 일관",
+        "늦은 이전 독자 응답 무시",
+        "신규·이력 부족·장애 대체 이유 표시",
+        "빈 결과와 API 실패 구분",
+        "브라우저에서 내부 추론·GCS·BigQuery·비밀에 직접 접근 안 함"
+      ]
+    },
+    {
+      "id": "FE-07",
+      "title": "수집부터 추천까지 연결 시연과 근거 저장",
+      "priority": "P1",
+      "status": "pending_integration",
+      "owner": "전체 팀, 프론트 검증 김세호",
+      "depends_on": [
+        "FE-03",
+        "FE-04",
+        "FE-05",
+        "FE-06"
+      ],
+      "decision_refs": [
+        "Q05",
+        "Q06",
+        "Q12"
+      ],
+      "source_refs": [
+        "E07",
+        "E08",
+        "E10"
+      ],
+      "files": [
+        "docs/ (new verification report)",
+        "tests/"
+      ],
+      "deliverable": "ID와 시각으로 추적한 종단 연결 검증 보고",
+      "acceptance": [
+        "이벤트·로깅 수락·GCS·정제 결과 추적",
+        "추천 결과의 독자별 차이와 근거 확인",
+        "데이터 담당의 시점 누출 검증 결과 연결",
+        "브라우저·시뮬레이터와 가상·수집 기사를 구분",
+        "실제 반영 지연과 미연결 단계를 그대로 보고"
+      ]
+    }
+  ]
+}

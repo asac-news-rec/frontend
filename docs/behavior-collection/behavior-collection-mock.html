@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>행동 수집 모의 검증</title>
+<style>body{font:16px/1.6 sans-serif;max-width:1000px;margin:30px auto;padding:20px;color:#17243a}button{padding:10px;cursor:pointer}article{border:1px solid #ccd4df;padding:24px;margin:18px 0;min-height:180px}a{color:#1755ac}pre{background:#edf1f6;padding:16px;white-space:pre-wrap;overflow-wrap:anywhere}.selected{color:#b21f50}#log{max-height:420px;overflow:auto}label{display:inline-block;margin:10px}</style>
+<h1>행동 수집 · 모의 검증</h1><p>가상 기사와 모의 API입니다. 실제 서버·클라우드로 전송하지 않습니다. 확정된 이벤트를 즉시 모의 API에 전달하며, 화면을 닫으면 기록이 사라집니다.</p>
+<label><input id="enabled" type="checkbox"> 모의 행동 측정 시작</label><label><input id="offline" type="checkbox"> 모의 API 장애</label><button id="retry">실패 기록 재시도</button>
+<p>목록은 카드 50% 이상·탭 활성·스크롤 정지 구간을 측정합니다. 상세는 스크롤 중에도 측정하며, 구간 종료 즉시 전송합니다.</p>
+<main id="view"></main><h2>즉시 전송 결과</h2><p id="status" role="status"></p><div id="log" aria-live="polite"></div>
+<script>
+const articles=[['a1','지역 도서관의 새로운 AI 교육'],['a2','도시에서 만나는 작은 숲'],['a3','함께 달리는 주말 러닝']].map(([id,title])=>({id,title,impression:'mock-'+crypto.randomUUID()}));
+const view=document.querySelector('#view'),enabled=document.querySelector('#enabled'),offline=document.querySelector('#offline'),log=document.querySelector('#log'),status=document.querySelector('#status');
+const pending=new Map(),stored=new Map(),timers=new Map(),visible=new Set(),liked=new Set();let detail=null,scrolling=false,stopTimer,attempts=0;
+function update(){status.textContent=`전송 시도 ${attempts}회 · 모의 저장 ${stored.size}건 · 미확인 ${pending.size}건`;}
+// 실제 API 연결 시 이 함수를 fetch 기반 어댑터로 교체한다.
+async function mockSend(event){await new Promise(r=>setTimeout(r,80));if(offline.checked)throw new Error('모의 연결 실패');if(!stored.has(event.event_id))stored.set(event.event_id,event);return {event_id:event.event_id,status:'accepted'};}
+async function transmit(event){pending.set(event.event_id,event);attempts++;update();try{await mockSend(event);pending.delete(event.event_id);const p=document.createElement('pre');p.textContent=JSON.stringify(event,null,2);log.prepend(p);}catch{}update();}
+function emit(data){if(enabled.checked)transmit({event_id:crypto.randomUUID(),...data});}
+function start(id,page){if(!enabled.checked||document.hidden||timers.has(id))return;timers.set(id,{mono:performance.now(),time:new Date().toISOString(),page});}
+function stop(id){const t=timers.get(id);if(!t)return;timers.delete(id);const duration=Math.round(performance.now()-t.mono);if(duration>0)emit({event_type:'exposure',event_time:t.time,ended_at:new Date().toISOString(),impression_id:id,page_type:t.page,duration_ms:duration});}
+function pause(){for(const id of [...timers.keys()])stop(id);}
+function resume(){if(detail)start(detail.impression,'detail');else if(!scrolling)for(const id of visible)start(id,'list');}
+const observer=new IntersectionObserver(entries=>{for(const e of entries){const id=e.target.dataset.impression;if(e.isIntersecting&&e.intersectionRatio>=.5){visible.add(id);if(!scrolling)start(id,'list');}else{visible.delete(id);stop(id);}}},{threshold:[0,.5,1]});
+function render(){observer.disconnect();visible.clear();view.replaceChildren();if(detail){const back=document.createElement('button');back.textContent='목록으로';back.onclick=()=>{pause();detail=null;render();};view.append(back);}
+for(const a of detail?[detail]:articles){const card=document.createElement('article');card.dataset.impression=a.impression;const title=document.createElement(detail?'h2':'button');title.textContent=a.title;if(!detail)title.onclick=()=>{pause();emit({event_type:'click',event_time:new Date().toISOString(),impression_id:a.impression,page_type:'list',action:'article_open'});detail=a;render();window.scrollTo(0,0);};card.append(title);const body=document.createElement('p');body.textContent=detail?'화면 검증용 가상 본문입니다. 다른 탭으로 이동하면 구간을 종료합니다. '.repeat(45):'가상 기사입니다. 카드를 보다가 스크롤하거나 상세로 이동해 전송 기록을 확인하세요.';card.append(body);const like=document.createElement('button');like.textContent='♡ 좋아요';like.className=liked.has(a.id)?'selected':'';like.setAttribute('aria-pressed',liked.has(a.id));like.onclick=()=>{const next=!liked.has(a.id);if(next)liked.add(a.id);else liked.delete(a.id);like.className=next?'selected':'';like.setAttribute('aria-pressed',next);emit({event_type:'click',event_time:new Date().toISOString(),impression_id:a.impression,page_type:detail?'detail':'list',action:next?'like':'unlike'});};card.append(like);view.append(card);if(!detail)observer.observe(card);}if(detail)resume();}
+window.addEventListener('scroll',()=>{if(detail)return;if(!scrolling){scrolling=true;pause();}clearTimeout(stopTimer);stopTimer=setTimeout(()=>{scrolling=false;resume();},300);},{passive:true});
+document.addEventListener('visibilitychange',()=>{if(document.hidden)pause();else resume();});window.addEventListener('pagehide',pause);
+enabled.onchange=()=>{if(enabled.checked)resume();else{timers.clear();pending.clear();update();}};
+document.querySelector('#retry').onclick=()=>{for(const event of [...pending.values()])transmit(event);};
+setInterval(()=>{if(enabled.checked&&!offline.checked)for(const event of [...pending.values()])transmit(event);},3000);
+render();update();
+</script></html>

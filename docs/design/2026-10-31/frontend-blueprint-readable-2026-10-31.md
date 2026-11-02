@@ -527,7 +527,7 @@ Bronze·Silver·Gold는 서비스 이름이 아니라 가공 단계다. Bronze�
 | Cloud Run → Cloud Storage → BigQuery | 현재 우선 권장안·실시간 반영 없이 원본 보관과 배치 학습 | 불변 파일·적재 작업 ID·작은 파일 통합·배치 주기 관리 |
 | Cloud Run → Pub/Sub → BigQuery | 수집과 적재 장애를 분리할 필요가 생긴 뒤의 확장 후보 | 현재 필수 구성 아님·추가 운영과 중복 처리 필요 |
 
-Cloud Storage 배치 경로를 우선 제안하고 DB 우선 저장·BigQuery 직접 기록은 요구가 달라질 때 비교할 대안으로 둔다. 실시간 반영이나 유입 급증에 따른 장애 분리가 필요해지면 Pub/Sub를 재검토한다. 상세 대안 비교는 gcp-behavior-logging-research.md를 참고한다. [S9][S10][S11]
+Cloud Storage 배치 경로를 우선 제안하고 DB 우선 저장·BigQuery 직접 기록은 요구가 달라질 때 비교할 대안으로 둔다. 실시간 반영이나 유입 급증에 따른 장애 분리가 필요해지면 Pub/Sub를 재검토한다. 상세 대안 비교는 ../../research/gcp-behavior-logging-research.md를 참고한다. [S9][S10][S11]
 
 #### 6.7 저장 데이터와 성공 응답 기준
 
@@ -732,7 +732,7 @@ rank는 기본 모델 입력보다 진단·위치 편향 분석용으로 먼저 
 - [S10] [BigQuery 배치 적재](https://docs.cloud.google.com/bigquery/docs/batch-loading-data) · 파일 기반 후속 적재 참고.
 - [S12] [Cloud Storage 요청 전제조건](https://docs.cloud.google.com/storage/docs/request-preconditions) · 조건부 객체 생성과 재시도 참고.
 - [S11] [Cloud Run 컨테이너 실행 계약](https://docs.cloud.google.com/run/docs/container-contract) · 임시 파일시스템과 포트·바인딩 제약 참고.
-- 내부 인프라 비교 자료 · gcp-behavior-logging-research.md. Pub/Sub 없는 대안과 서비스별 역할·공식 출처를 함께 정리했다.
+- 내부 인프라 비교 자료 · ../../research/gcp-behavior-logging-research.md. Pub/Sub 없는 대안과 서비스별 역할·공식 출처를 함께 정리했다.
 - 프로젝트 내부 근거 · frontend_backend_contract_v0.1.md, frontend/src/app.js, frontend/src/service.js, frontend/src/data.js 및 asac-news-frontend의 현재 코드.
 
 | 용어 | 이 문서에서의 의미 |
@@ -766,7 +766,7 @@ rank는 기본 모델 입력보다 진단·위치 편향 분석용으로 먼저 
 
 ### A10 현재 상태와 구현 범위
 
-구현 후속 기록 · 2026년 10월 29일. 비로그인 방문자 쿠키 식별만 로컬 Node 서버와 SQLite에 구현했다. 초기 관심사 선택·저장은 팀에서 논의하지 않은 기능이므로 제거했다. 현재 저장하는 데이터는 토큰 해시, 독자 ID, 생성·최근 방문·만료 시각이다. 추천·행동 수집 API는 여전히 제안이며 최신 구현 범위는 anonymous-visitor-implementation.md를 참고한다.
+구현 후속 기록 · 2026년 10월 29일. 비로그인 방문자 쿠키 식별만 로컬 Node 서버와 SQLite에 구현했다. 초기 관심사 선택·저장은 팀에서 논의하지 않은 기능이므로 제거했다. 현재 저장하는 데이터는 토큰 해시, 독자 ID, 생성·최근 방문·만료 시각이다. 추천·행동 수집 API는 여전히 제안이며 최신 구현 범위는 ../../implementation/anonymous-visitor-implementation.md를 참고한다.
 
 현재 확인한 프론트엔드는 외부 패키지 설치가 필요 없는 정적 HTML·CSS·JavaScript 프로토타입이다. 가상 독자 3명과 가상 기사 8개를 사용한다. 독자별 미리 정한 순서가 다르며, 이는 학습 모델이 예측한 결과가 아니다.
 

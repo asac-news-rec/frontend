@@ -31,3 +31,11 @@ export async function getFeedPage(readerId, category, mode='normal', offset=0, l
   const items = feed.items.slice(offset, offset + limit);
   return {...feed, items, nextOffset:offset + items.length < feed.items.length ? offset + items.length : null};
 }
+
+export async function getVisitorFeed() {
+ const response=await fetch('/api/v1/feed',{cache:'no-store',credentials:'same-origin'});
+ if(!response.ok)throw new Error('피드를 불러오지 못했어요. 다시 시도해 주세요.');
+ const {data}=await response.json();
+ if(!data||!['latest','liked_categories'].includes(data.strategy)||!Array.isArray(data.items)||data.items.some(item=>!item.article||typeof item.article.id!=='string'||typeof item.article.title!=='string'||typeof item.reason!=='string'))throw new Error('피드 응답 형식이 올바르지 않습니다.');
+ return data;
+}
