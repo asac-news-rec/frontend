@@ -8,3 +8,13 @@ data/
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
+
+# Local secrets and agent settings
+.env
+.env.*
+!.env.example
+keys/
+*.pem
+*.key
+agent.local.md
+.claude/settings.local.json
