@@ -11,7 +11,7 @@ npm start
 
 브라우저에서 `http://127.0.0.1:4173/`을 엽니다. 기본 화면이 백엔드 피드를 사용합니다. 백엔드의 Nginx `127.0.0.1:8080`을 사용할 때는 `NEWS_BACKEND_URL='http://127.0.0.1:8080/api/'`로 설정합니다. Docker 프론트엔드에서 호스트의 백엔드로 접근할 때는 `NEWS_BACKEND_URL='http://host.docker.internal:8000/'`을 설정하고 `docker compose up -d --build --wait`로 실행합니다. 실제 접속 주소는 이 PC와 백엔드 담당자가 접근 가능한 호스트 주소에 맞춰야 합니다. 기존 샘플 화면은 `/?feed=sample`에서 별도로 확인할 수 있습니다.
 
-DB의 `image_url`이 백엔드 저장소의 기본값인 `http://localhost:8001/`을 가리키면 백엔드 폴더에서 `python -m http.server 8001 --bind 127.0.0.1 --directory generate/output_with_thumbnail`을 실행해 썸네일을 제공합니다. 이미지가 없거나 접근할 수 없으면 화면은 기존 일러스트를 표시합니다.
+DB의 `image_url`이 백엔드 저장소의 기본값인 `http://localhost:8001/`을 가리키면 아래 Docker 실행 절차의 이미지 서버도 켭니다. 이미지가 없거나 접근할 수 없으면 화면은 기존 일러스트를 표시합니다.
 
 백엔드 모드는 브라우저에 `reader_id`를 저장하며 백엔드 피드의 `items`, `next_offset`, `is_liked`를 화면에 사용합니다. 목록은 백엔드의 최신순이며 학습된 추천 순위가 아닙니다. 백엔드 기사는 상세 새로고침 시 목록 캐시가 없어 다시 피드에서 열어야 합니다. 이 모드의 좋아요는 백엔드 API에 저장됩니다. 이전 샘플 화면의 방문자 쿠키와 로컬 SQLite 좋아요는 별도입니다. 실제 백엔드와 DB가 기동되지 않았다면 연결 오류를 표시하며 샘플 기사로 대체하지 않습니다.
 
@@ -21,14 +21,28 @@ DB의 `image_url`이 백엔드 저장소의 기본값인 `http://localhost:8001/
 
 ## Docker로 실행
 
-Docker Desktop을 실행하고 프로젝트 폴더에서 다음 명령을 실행합니다.
+태원님 PC에서는 다음 순서대로 확인할 수 있습니다. 프론트엔드와 백엔드 저장소는 같은 PC에 두고 Docker Desktop을 실행합니다.
+
+1. 백엔드 저장소의 안내에 따라 API와 DB를 먼저 실행합니다. 브라우저에서 `http://127.0.0.1:8000/health`가 `{"status":"ok","database":1}`을 반환하고 기사 데이터가 적재되어 있어야 합니다.
+2. 프론트엔드 저장소에서 `feat/7-backend-integration` 브랜치로 전환한 뒤 아래 명령을 실행합니다.
 
 ```powershell
+git switch feat/7-backend-integration
 $env:NEWS_BACKEND_URL='http://host.docker.internal:8000/'
 docker compose up -d --build --wait
 ```
 
-브라우저에서 **http://127.0.0.1:4181/** 을 엽니다. Origin 검증을 위해 localhost 대신 이 주소를 사용합니다. 화면과 방문자 API를 같은 컨테이너에서 제공합니다. 빌드 중 문법 검사·테스트·정적 빌드가 실행됩니다.
+3. 브라우저에서 **http://127.0.0.1:4181/** 을 엽니다. 기사 제목과 본문이 나오면 연결된 것입니다. Docker 컨테이너 내부의 4173 포트가 PC의 4181 포트에 연결됩니다. Docker로 확인할 때 PC의 4173을 따로 열거나 `npm start`를 실행할 필요가 없습니다. Origin 검증을 위해 `localhost` 대신 `127.0.0.1`을 사용합니다.
+
+4. 기사 썸네일 URL이 `http://localhost:8001/`인 경우, 백엔드 저장소 폴더에서 아래 명령으로 이미지 서버를 한 번 실행합니다. 이 서버는 백엔드의 이미지 파일을 읽기 전용으로 제공합니다.
+
+```powershell
+docker run -d --name asac-news-backend-images -p 127.0.0.1:8001:80 -v "${PWD}/generate/output_with_thumbnail:/usr/share/nginx/html:ro" nginx:stable-alpine
+```
+
+이미지 서버를 다시 시작할 때는 `docker start asac-news-backend-images`를 사용합니다. 이미지 서버를 실행하지 않아도 기사 제목·본문과 좋아요는 동작합니다. 프론트엔드 이미지 빌드 중 문법 검사·테스트·정적 빌드가 실행됩니다.
+
+화면이 연결 오류를 보이면 백엔드의 `/health`와 다음 로그를 확인합니다.
 
 ```powershell
 docker compose ps
