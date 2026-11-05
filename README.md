@@ -21,6 +21,8 @@ DB의 `image_url`이 백엔드 저장소의 기본값인 `http://localhost:8001/
 
 ## Docker로 실행
 
+집 Mac에서 프론트엔드와 백엔드를 함께 시연하는 절차는 [Mac Docker 시연 안내](docs/mac-docker-demo.md)를 참고하세요.
+
 태원님 PC에서는 다음 순서대로 확인할 수 있습니다. 프론트엔드와 백엔드 저장소는 같은 PC에 두고 Docker Desktop을 실행합니다.
 
 1. 백엔드 저장소의 안내에 따라 API와 DB를 먼저 실행합니다. 브라우저에서 `http://127.0.0.1:8000/health`가 `{"status":"ok","database":1}`을 반환하고 기사 데이터가 적재되어 있어야 합니다.
