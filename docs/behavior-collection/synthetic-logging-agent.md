@@ -16,6 +16,12 @@
 
 ## 실행
 
+`examples/synthetic-personas.json`에는 서로 다른 관심사의 가상 독자 5명이 있다. 관심사 이름은 현재 **프런트엔드 시연 데이터**의 IT·과학, 스포츠, 문화, 사회, 생활을 기준으로 했다. 백엔드 DB의 `exports/news_articles.dump`는 이 작업 환경에서 읽을 수 없어 DB 카테고리와 일치한다고 확인하지 못했다. `scripts/make-synthetic-contexts.mjs`는 이 페르소나와 프런트엔드의 가상 기사 8건을 결합해 실행 입력을 만든다. 이 데이터는 로컬 경로 검증용이며 실제 수집 기사나 백엔드 DB의 기사 ID가 아니다.
+
+```powershell
+node scripts/make-synthetic-contexts.mjs > contexts.json
+```
+
 로깅 서버를 켠 뒤 저장소 루트에서 실행한다. 아래 파일명은 직접 만든 입력 파일의 예시다. 비밀값과 실제 개인정보를 입력 JSON이나 Git에 넣지 않는다.
 
 ```powershell
