@@ -1,5 +1,5 @@
 import {changeBackendLike} from './backend-api.js';
-const backendMode=new URLSearchParams(location.search).get('feed')==='backend';
+const backendMode=new URLSearchParams(location.search).get('feed')!=='sample';
 const liked=new Set();
 let status='loading';
 let pending=false;

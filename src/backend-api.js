@@ -33,7 +33,7 @@ export async function getBackendReaderId({storage=globalThis.window?.localStorag
 export async function getBackendPage(offset=0,{fetchImpl=fetch,getReaderId=getBackendReaderId}={}){
  const readerId=await getReaderId();
  const response=await request('/news/feed',{reader_id:readerId,offset},'POST',fetchImpl);
- if(!response||typeof response.request_id!=='string'||!Number.isFinite(Date.parse(response.served_at))||
+ if(!response||(response.reader_id!==undefined&&response.reader_id!==readerId)||typeof response.request_id!=='string'||!Number.isFinite(Date.parse(response.served_at))||
   !Array.isArray(response.items)||!(response.next_offset===null||Number.isSafeInteger(response.next_offset)&&response.next_offset>=0))throw new Error('INVALID_BACKEND_FEED');
  const items=response.items.map(item=>{
   if(!item||typeof item.article_id!=='string'||typeof item.impression_id!=='string'||

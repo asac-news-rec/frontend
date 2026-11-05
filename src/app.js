@@ -1,12 +1,11 @@
 import {likeButton,refreshLikes,seedBackendLikes} from './likes.js';
 import {getVisitorFeed,getArticle,getCategories} from './service.js';
 import {getBackendPage} from './backend-api.js';
-const backendMode=new URLSearchParams(location.search).get('feed')==='backend';
+const backendMode=new URLSearchParams(location.search).get('feed')!=='sample';
 const backendArticles=new Map();
 const main=document.querySelector('main');
 let feedScrollY=0;
 let snapshot=[];
-let feedDirty=false;
 let categories=[];
 let observer;
 let nextOffset=null;
@@ -31,11 +30,11 @@ function render(){
   if(state.articleId){renderArticle();return;}
   const personal=state.feed?.strategy==='liked_categories';
   main.innerHTML=`<section class="intro"><div><div class="overline">YOUR DAILY PERSPECTIVE</div><h1>오늘의 세상,<br><em>나의 관심사</em>로 읽다.</h1><p>새로운 소식과 뜻밖의 발견을 한곳에서 만나보세요.</p></div><div class="intro-aside"><span class="edition">SAI NEWS / FIRST EDITION</span><div class="edition-line"></div><p>하나의 세상,<br>서로 다른 시선.</p><span class="edition">PERSONALIZED READING</span></div></section>
-  <aside class="new-reader"><strong>${backendMode?'백엔드 뉴스 피드':personal?'좋아요를 바탕으로 고른 뉴스':'새로운 소식부터 둘러보세요'}</strong><span>${backendMode?'백엔드 서버의 기사 목록을 발행 시각 순으로 보여드립니다.':personal?'좋아요한 기사의 카테고리를 먼저 보여드려요.':'좋아요 이력이 없으면 최신순으로 보여드려요.'}</span>${feedDirty?'<span>좋아요가 변경됐어요. 다시 불러오기를 누르면 피드에 반영됩니다.</span>':''}</aside>
-  <section class="feed"><div class="feed-heading"><div><span class="overline">FOR YOU</span><h2>${personal?'나를 위한 뉴스':'최신 뉴스'}</h2></div><button id="refresh" class="refresh">↻ <span>다시 불러오기</span></button></div><div class="feed-meta"><span>${backendMode?'백엔드 뉴스 API의 기사입니다. 가상 여부는 기사별로 표시합니다. 현재 추천 모델 순위는 적용되지 않습니다.':'기사는 가상 데이터입니다. 추천 순서는 이 브라우저의 좋아요를 참고한 기본 규칙이며 학습 모델은 아닙니다.'}</span><span>${state.feed?`목록 생성 · ${date(state.feed.generatedAt)}`:'목록을 준비하고 있어요'}</span></div>
+  ${backendMode?'':`<aside class="new-reader"><strong>${personal?'좋아요를 바탕으로 고른 뉴스':'새로운 소식부터 둘러보세요'}</strong><span>${personal?'좋아요한 기사의 카테고리를 먼저 보여드려요.':'좋아요 이력이 없으면 최신순으로 보여드려요.'}</span></aside>`}
+  <section class="feed"><div class="feed-heading"><div><span class="overline">FOR YOU</span><h2>${personal?'나를 위한 뉴스':'최신 뉴스'}</h2></div><button id="refresh" class="refresh">↻ <span>다시 불러오기</span></button></div><div class="feed-meta">${backendMode?'':`<span>기사는 가상 데이터입니다. 추천 순서는 이 브라우저의 좋아요를 참고한 기본 규칙이며 학습 모델은 아닙니다.</span>`}<span>${state.feed?`목록 생성 · ${date(state.feed.generatedAt)}`:'목록을 준비하고 있어요'}</span></div>
   <nav class="categories" aria-label="기사 카테고리">${categories.map(c=>`<button data-category="${escape(c)}" aria-pressed="${state.category===c}" class="${state.category===c?'active':''}">${escape(c)}</button>`).join('')}</nav>
   ${categoryError?`<p role="alert">${escape(categoryError)} <button id="category-retry">다시 시도</button></p>`:''}<div id="results" aria-live="polite" aria-busy="${state.status==='loading'}">${results()}</div></section>
-  <details class="demo"><summary>팀 검토용 · 화면 상태 시연</summary><p>화면 동작만 전환합니다. 피드는 서버 API를 사용하며 이 메뉴는 오류·빈 결과 상태를 시연합니다. 카테고리는 서버 API에서 불러옵니다.</p><div>${[['normal','기본 화면'],['loading','느린 로딩'],['empty','기사 없음'],['error','조회 실패']].map(([value,label])=>`<button data-mode="${value}" aria-pressed="${state.mode===value}">${label}</button>`).join('')}</div></details>`;
+  ${backendMode?'':`<details class="demo"><summary>팀 검토용 · 화면 상태 시연</summary><p>화면 동작만 전환합니다. 피드는 서버 API를 사용하며 이 메뉴는 오류·빈 결과 상태를 시연합니다. 카테고리는 서버 API에서 불러옵니다.</p><div>${[['normal','기본 화면'],['loading','느린 로딩'],['empty','기사 없음'],['error','조회 실패']].map(([value,label])=>`<button data-mode="${value}" aria-pressed="${state.mode===value}">${label}</button>`).join('')}</div></details>`}`;
   main.querySelector('#refresh').onclick=()=>load();
   main.querySelectorAll('[data-category]').forEach(b=>b.onclick=()=>{state.category=b.dataset.category;load();});
   main.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{state.mode=b.dataset.mode;load();});
@@ -88,7 +87,7 @@ async function load(){
     if(state.mode==='error')throw new Error('조회 실패 시연입니다. 다시 시도해 주세요.');
     const feed=backendMode?await getBackendPage(0):await getVisitorFeed();if(token!==state.request)return;
     snapshot=state.mode==='empty'?[]:feed.items.filter(item=>state.category==='전체'||item.article.category===state.category);
-    state.feed={...feed,items:backendMode?snapshot:snapshot.slice(0,3)};nextOffset=backendMode?feed.nextOffset:snapshot.length>3?3:null;if(backendMode){backendArticles.clear();snapshot.forEach(item=>backendArticles.set(item.article.id,item.article));seedBackendLikes(snapshot,true);}feedDirty=false;state.status='ready';
+    state.feed={...feed,items:backendMode?snapshot:snapshot.slice(0,3)};nextOffset=backendMode?feed.nextOffset:snapshot.length>3?3:null;if(backendMode){backendArticles.clear();snapshot.forEach(item=>backendArticles.set(item.article.id,item.article));seedBackendLikes(snapshot,true);}state.status='ready';
   }
   catch(error){if(token!==state.request)return;state.status='error';state.error=error.message;}
   render();
@@ -109,7 +108,6 @@ window.addEventListener('hashchange',()=>{
   requestAnimationFrame(()=>window.scrollTo({top:state.articleId?0:feedScrollY,left:0,behavior:'instant'}));
 });
 window.addEventListener('visitor-changed',()=>{state.feed=null;snapshot=[];feedScrollY=0;load();});
-window.addEventListener('likes-changed',()=>{feedDirty=true;const heading=main.querySelector('.new-reader');if(heading&&!heading.querySelector('[data-dirty]'))heading.insertAdjacentHTML('beforeend','<span data-dirty>좋아요가 변경됐어요. 다시 불러오기를 누르면 피드에 반영됩니다.</span>');});
 state.articleId=location.hash.startsWith('#article/')?decodeURIComponent(location.hash.slice(9)):null;
 initialize();
 

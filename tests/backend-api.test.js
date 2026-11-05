@@ -58,6 +58,11 @@ test('잘못된 기사 응답과 좋아요 응답을 적용하지 않는다',asy
  await assert.rejects(changeBackendLike('a1',true,{fetchImpl:like,getReaderId:async()=>readerId}),/INVALID_BACKEND_LIKE/);
 });
 
+test('피드 응답에 reader_id가 있으면 요청 독자와 일치해야 한다',async()=>{
+ const feed=async()=>({ok:true,json:async()=>({reader_id:'other-reader',request_id:'r',served_at:'2026-11-04T01:30:00Z',items:[],next_offset:null})});
+ await assert.rejects(getBackendPage(0,{fetchImpl:feed,getReaderId:async()=>readerId}),/INVALID_BACKEND_FEED/);
+});
+
 test('중복 좋아요 응답과 새 목록이 이전 요청의 늦은 완료를 처리한다',async()=>{
  let finish;
  const state=createBackendLikeState({change:()=>new Promise(resolve=>{finish=resolve;})});

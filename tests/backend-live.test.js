@@ -27,7 +27,7 @@ test('화면 서버가 백엔드 발급·피드·좋아요를 같은 출처에�
  t.after(async()=>{await new Promise(resolve=>server.close(resolve));close();await new Promise(resolve=>upstream.close(resolve));await rm(directory,{recursive:true,force:true});});
  const base=`http://127.0.0.1:${server.address().port}`;
  const request=(route,method,body)=>fetch(base+route,{method,headers:{Origin:origin,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});
- assert.match(await (await fetch(base+'/?feed=backend')).text(),/src\/app.js/);
+ assert.match(await (await fetch(base+'/')).text(),/src\/app.js/);
  assert.equal((await request('/api/v1/backend/user/anonymous','POST')).status,200);
  const feed=await (await request('/api/v1/backend/news/feed','POST',{reader_id:'reader-1',offset:0})).json();
  assert.equal(feed.items[0].title,'백엔드 기사');
