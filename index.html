@@ -14,6 +14,6 @@
   <main id="main" tabindex="-1"></main>
   <footer><strong>사이 뉴스</strong><span>함께 살펴보는 개인화 뉴스의 첫 모습.</span><span>가상 기사 · 방문자별 좋아요 기반 피드</span></footer>
   <script type="module" src="./src/app.js"></script>
-  <script type="module" src="./src/visitor.js"></script>
+  <script type="module">if(new URLSearchParams(location.search).get('feed')==='sample')import('./src/visitor.js');else {document.querySelector('#visitor').style.display='none';document.querySelector('footer span:last-child').textContent='오늘의 뉴스';}</script>
 </body>
 </html>

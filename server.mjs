@@ -4,7 +4,7 @@ import {createNewsServer} from './server/http.mjs';
 const root = fileURLToPath(new URL('.', import.meta.url));
 const port = Number(process.env.PORT || 4173);
 const origin = process.env.PUBLIC_ORIGIN || `http://127.0.0.1:${port}`;
-const {server, close} = createNewsServer({root, origin, database: process.env.VISITOR_DB || path.join(root, 'data', 'visitors.sqlite')});
+const {server, close} = createNewsServer({root, origin, database: process.env.VISITOR_DB || path.join(root, 'data', 'visitors.sqlite'), backendBaseUrl: process.env.NEWS_BACKEND_URL});
 const host = process.env.HOST || '127.0.0.1';
 server.listen(port, host, () => console.log(`News prototype: ${origin}`));
 for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => server.close(() => {close(); process.exit(0);}));
