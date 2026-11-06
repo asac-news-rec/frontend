@@ -64,7 +64,7 @@ test('익명 방문자의 HTTP 쿠키·서버 저장·재방문·삭제·만료'
     assert.equal((await request('bootstrap', {cookie:cookieB, body:{reader_id:reader.reader_id}})).status, 400);
     assert.equal((await request('interests', {cookie:cookieA, body:{initial_interests:['문화']}})).status, 404);
     assert.equal((await request('reset', {cookie:cookieA, body:{}, originHeader:'https://attacker.example'})).status, 403);
-    for (const resource of ['/data/visitors.sqlite', '/server/http.ts', '/dist/server/http.js', '/tests/visitor.test.js', '/package.json']) assert.equal((await fetch(base + resource)).status, 404);
+    for (const resource of ['/data/visitors.sqlite', '/server/http.ts', '/server/http.js', '/server.js', '/tests/visitor.test.js', '/package.json']) assert.equal((await fetch(base + resource)).status, 404);
     assert.equal((await fetch(base + '/')).status, 200);
     const reset = await request('reset', {cookie:cookieA, body:{}});
     assert.equal(reset.status, 200);
@@ -109,6 +109,7 @@ test('기존 DB의 관심사만 제거하고 방문자 연결은 유지한다', 
   old.close();
   store = openVisitors(database);
   try {
+    assert.equal(store.find('A'.repeat(43)), null);
     assert.equal(store.bootstrap(original.token).data.reader_id, original.data.reader_id);
     const db = new DatabaseSync(database);
     assert.ok(!db.prepare('PRAGMA table_info(visitors)').all().some(column => column.name === 'interests'));

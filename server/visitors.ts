@@ -27,7 +27,7 @@ export function openVisitors(database:string, now:()=>number = Date.now) {
   prune();
   function find(token:string|null):VisitorRow|null {
     if (!token || !/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
-    return db.prepare('SELECT * FROM visitors WHERE token_hash = ? AND expires_at > ?').get(hash(token), now()) as unknown as VisitorRow|null;
+    return (db.prepare('SELECT * FROM visitors WHERE token_hash = ? AND expires_at > ?').get(hash(token), now()) as unknown as VisitorRow|undefined) ?? null;
   }
   function profile(row:VisitorRow) {
     return {reader_id:row.reader_id, reader_type:'anonymous',
