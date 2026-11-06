@@ -23,6 +23,8 @@ AGENTS.md            Windows 호환을 위한 동일 내용의 사본
 .github/             이슈·PR 양식과 브랜치 이름 검사
 ```
 
+브라우저와 Node 서버의 소스는 TypeScript입니다. 빌드 후 브라우저는 `dist/src/*.js`를 받고 서버는 `dist/server.js`에서 실행됩니다. 빌드·검증 도구와 테스트는 JavaScript로 유지합니다.
+
 Windows Git에서 `core.symlinks=false`이면 `.agents`가 링크 대상 문자열을 담은 일반 파일로 체크아웃될 수 있습니다. 이 경우 `.claude/docs/`를 직접 사용합니다. `AGENTS.md`와 `CLAUDE.md`는 내용이 같아야 합니다.
 
 ## 파일 책임
