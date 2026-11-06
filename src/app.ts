@@ -1,13 +1,15 @@
 import type {Article, Feed, FeedItem, FeedMode} from './types.js';
 import {likeButton,refreshLikes,seedBackendLikes} from './likes.js';
 import {getVisitorFeed,getArticle,getCategories} from './service.js';
-import {getBackendPage} from './backend-api.js';
+import {getBackendPage,getBackendCategories,getBackendSubcategories} from './backend-api.js';
 const backendMode=new URLSearchParams(location.search).get('feed')!=='sample';
 const backendArticles=new Map<string, Article>();
 const main=document.querySelector('main')!;
 let feedScrollY=0;
 let snapshot: FeedItem[]=[];
 let categories: string[]=[];
+let subcategories: string[]=[];
+let subcategoryRequest=0;
 let observer: IntersectionObserver | undefined;
 let nextOffset: number | null=null;
 let loadingMore=false;
@@ -20,7 +22,8 @@ window.addEventListener('scroll',()=>{
 main.addEventListener('click',event=>{
   if(!state.articleId&&event.target instanceof Element&&event.target.closest('a[data-article]')&&!event.ctrlKey&&!event.metaKey&&!event.shiftKey&&event.button===0)feedScrollY=window.scrollY;
 });
-const state={category:'전체',status:'loading',feed:null as Feed | null,articleId:null as string | null,mode:'normal' as FeedMode,error:'',request:0};
+const state={category:'전체',subcategory:'전체',status:'loading',feed:null as Feed | null,articleId:null as string | null,mode:'normal' as FeedMode,error:'',request:0};
+const selectedFilters=()=>({category:state.category==='전체'?null:state.category,subcategory:state.subcategory==='전체'?null:state.subcategory});
 const escape=(value: unknown)=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c as '&' | '<' | '>' | '"' | "'"]));
 const date=(value: string)=>new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',month:'long',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(value));
 const art=(article: Article,extra='')=>{let image='';if(backendMode&&article.imageUrl){try{const url=new URL(article.imageUrl,location.href);if(['http:','https:'].includes(url.protocol))image=`<img class="article-photo" src="${escape(url.href)}" alt="" loading="lazy">`;}catch{}}return `<div class="art art-${article.art} ${extra}" aria-hidden="true"><span class="orb"></span><span class="shape"></span><span class="art-word">${escape(article.category==='IT·과학'?'DISCOVER':article.category==='스포츠'?'MOVE':'EVERYDAY')}</span><span class="art-caption">SAI ORIGINAL · ILLUSTRATION</span>${image}</div>`;};
@@ -34,10 +37,12 @@ function render(){
   ${backendMode?'':`<aside class="new-reader"><strong>${personal?'좋아요를 바탕으로 고른 뉴스':'새로운 소식부터 둘러보세요'}</strong><span>${personal?'좋아요한 기사의 카테고리를 먼저 보여드려요.':'좋아요 이력이 없으면 최신순으로 보여드려요.'}</span></aside>`}
   <section class="feed"><div class="feed-heading"><div><span class="overline">FOR YOU</span><h2>${personal?'나를 위한 뉴스':'최신 뉴스'}</h2></div><button id="refresh" class="refresh">↻ <span>다시 불러오기</span></button></div><div class="feed-meta">${backendMode?'':`<span>기사는 가상 데이터입니다. 추천 순서는 이 브라우저의 좋아요를 참고한 기본 규칙이며 학습 모델은 아닙니다.</span>`}<span>${state.feed?`목록 생성 · ${date(state.feed.generatedAt)}`:'목록을 준비하고 있어요'}</span></div>
   <nav class="categories" aria-label="기사 카테고리">${categories.map(c=>`<button data-category="${escape(c)}" aria-pressed="${state.category===c}" class="${state.category===c?'active':''}">${escape(c)}</button>`).join('')}</nav>
+  ${backendMode&&state.category!=='전체'?`<div class="subcategory-filter"><label for="subcategory">소분류</label><select id="subcategory"><option value="전체">전체</option>${subcategories.map(c=>`<option value="${escape(c)}" ${state.subcategory===c?'selected':''}>${escape(c)}</option>`).join('')}</select></div>`:''}
   ${categoryError?`<p role="alert">${escape(categoryError)} <button id="category-retry">다시 시도</button></p>`:''}<div id="results" aria-live="polite" aria-busy="${state.status==='loading'}">${results()}</div></section>
   ${backendMode?'':`<details class="demo"><summary>팀 검토용 · 화면 상태 시연</summary><p>화면 동작만 전환합니다. 피드는 서버 API를 사용하며 이 메뉴는 오류·빈 결과 상태를 시연합니다. 카테고리는 서버 API에서 불러옵니다.</p><div>${[['normal','기본 화면'],['loading','느린 로딩'],['empty','기사 없음'],['error','조회 실패']].map(([value,label])=>`<button data-mode="${value}" aria-pressed="${state.mode===value}">${label}</button>`).join('')}</div></details>`}`;
   main.querySelector<HTMLButtonElement>('#refresh')!.onclick=()=>load();
-  main.querySelectorAll<HTMLButtonElement>('[data-category]').forEach(b=>b.onclick=()=>{state.category=b.dataset.category ?? state.category;load();});
+  main.querySelectorAll<HTMLButtonElement>('[data-category]').forEach(b=>b.onclick=()=>{state.category=b.dataset.category ?? state.category;state.subcategory='전체';subcategories=[];load();if(backendMode&&state.category!=='전체')loadSubcategories(state.category);});
+  main.querySelector<HTMLSelectElement>('#subcategory')?.addEventListener('change',event=>{state.subcategory=(event.target as HTMLSelectElement).value;load();});
   main.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach(b=>b.onclick=()=>{state.mode=b.dataset.mode as FeedMode;load();});
   main.querySelector('#category-retry')?.addEventListener('click',initialize);
   connectMore();
@@ -70,7 +75,7 @@ async function loadMore(){
   const panel=main.querySelector('#pagination');
   if(panel)panel.innerHTML=pagination();
   try{
-    const page=backendMode?await getBackendPage(offset):{items:snapshot.slice(offset,offset+3),nextOffset:offset+3<snapshot.length?offset+3:null};
+    const page=backendMode?await getBackendPage(offset,{filters:selectedFilters()}):{items:snapshot.slice(offset,offset+3),nextOffset:offset+3<snapshot.length?offset+3:null};
     if(token!==state.request)return;
     const known=new Set(state.feed.items.map(item=>item.article.id));
     const added=page.items.filter(item=>!known.has(item.article.id));
@@ -86,16 +91,21 @@ async function load(){
   try{
     if(state.mode==='loading')await new Promise(resolve=>setTimeout(resolve,1800));
     if(state.mode==='error')throw new Error('조회 실패 시연입니다. 다시 시도해 주세요.');
-    const feed=backendMode?await getBackendPage(0):await getVisitorFeed();if(token!==state.request)return;
-    snapshot=state.mode==='empty'?[]:feed.items.filter(item=>state.category==='전체'||item.article.category===state.category);
+    const feed=backendMode?await getBackendPage(0,{filters:selectedFilters()}):await getVisitorFeed();if(token!==state.request)return;
+    snapshot=state.mode==='empty'?[]:feed.items.filter(item=>backendMode||state.category==='전체'||item.article.category===state.category);
     state.feed={...feed,items:backendMode?snapshot:snapshot.slice(0,3)};nextOffset='nextOffset' in feed ? feed.nextOffset as number | null :snapshot.length>3?3:null;if(backendMode){backendArticles.clear();snapshot.forEach(item=>backendArticles.set(item.article.id,item.article));seedBackendLikes(snapshot,true);}state.status='ready';
   }
   catch(error){if(token!==state.request)return;state.status='error';state.error=error instanceof Error ? error.message : String(error);}
   render();
 }
 async function initialize(){
-  try{categories=backendMode?['전체']:await getCategories();categoryError='';if(!categories.includes(state.category))state.category=categories[0];await load();}
+  try{categories=backendMode?['전체',...await getBackendCategories()]:await getCategories();categoryError='';if(!categories.includes(state.category))state.category=categories[0];await load();}
   catch(error){categoryError=error instanceof Error ? error.message : String(error);state.status='error';state.error=error instanceof Error ? error.message : String(error);render();}
+}
+async function loadSubcategories(category: string){
+ const token=++subcategoryRequest;
+ try{const list=await getBackendSubcategories(category);if(token!==subcategoryRequest||state.category!==category)return;subcategories=list;categoryError='';render();}
+ catch(error){if(token!==subcategoryRequest||state.category!==category)return;categoryError=error instanceof Error?error.message:String(error);render();}
 }
 function renderArticle(){if(state.articleId===null)return;const a=backendMode?backendArticles.get(state.articleId):getArticle(state.articleId);if(!a){main.innerHTML='<div class="empty"><h1>기사를 찾을 수 없어요</h1><a href="#">뉴스 피드로 돌아가기</a></div>';return;}
   main.innerHTML=`<article class="article-page"><a class="back" href="#">← 뉴스 피드로 돌아가기</a><div class="eyebrow"><span>${escape(a.category)}</span><span class="fiction">${a.synthetic?'가상 기사':'뉴스 기사'}</span></div><h1>${escape(a.title)}</h1><p class="article-summary">${escape(a.summary)}</p>${likeButton(a.id)}<div class="byline">${escape(a.publisher)} <span>${date(a.publishedAt)} KST</span></div>${art(a,'article-art')}<p class="illustration-note">기사 내용을 표현한 그래픽 일러스트</p><div class="article-body">${a.body.split('\n\n').map(p=>`<p>${escape(p)}</p>`).join('')}</div><aside class="source-note"><strong>${backendMode?'백엔드 뉴스 API에서 받은 기사입니다.':'화면 검토용 가상 기사입니다.'}</strong><p>${backendMode?'기사의 가상 여부는 상단 표기를 확인해 주세요.':'인물·사건·내용은 창작 예시이며 실제 보도가 아닙니다. 외부 원문과 실제 취재 출처는 없습니다. 클릭과 읽기 시간은 외부로 전송하지 않습니다.'}</p></aside><a class="back bottom-back" href="#">← 뉴스 피드로 돌아가기</a></article>`;

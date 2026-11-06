@@ -8,6 +8,8 @@ export function createBackendProxy({baseUrl,origin,fetchImpl=fetch}:{baseUrl?:st
   if(!target)return reply(503,{error:'BACKEND_NOT_CONFIGURED'});
   let route:string,method:string|undefined;
   if(pathname==='/api/v1/backend/user/anonymous'){route='/user/anonymous';method='POST';}
+  else if(pathname==='/api/v1/backend/category'){route='/category';method='POST';}
+  else if(pathname==='/api/v1/backend/subcategory'){route='/subcategory';method='POST';}
   else if(pathname==='/api/v1/backend/news/feed'){route='/news/feed';method='POST';}
   else {
    const match=/^\/api\/v1\/backend\/news\/([^/]+)\/like$/.exec(pathname);
@@ -19,13 +21,13 @@ export function createBackendProxy({baseUrl,origin,fetchImpl=fetch}:{baseUrl?:st
   }
   if(req.method!==method)return reply(405,{error:'METHOD_NOT_ALLOWED'});
   if(req.headers.origin!==origin)return reply(403,{error:'ORIGIN_REJECTED'});
-  if(route!=='/user/anonymous'&&req.headers['content-type']?.split(';')[0]!=='application/json')return reply(415,{error:'JSON_REQUIRED'});
+  if(!['/user/anonymous','/category'].includes(route)&&req.headers['content-type']?.split(';')[0]!=='application/json')return reply(415,{error:'JSON_REQUIRED'});
   let size=0;const chunks=[];
   for await(const chunk of req){size+=chunk.length;if(size>262144)return reply(413,{error:'BODY_TOO_LARGE'});chunks.push(chunk);}
-  if(route==='/user/anonymous'&&size)return reply(400,{error:'BODY_NOT_ALLOWED'});
+  if(['/user/anonymous','/category'].includes(route)&&size)return reply(400,{error:'BODY_NOT_ALLOWED'});
   const body=Buffer.concat(chunks);
   try{
-   const upstream=await fetchImpl(new URL(route.slice(1),target),{method,headers:route==='/user/anonymous'?{}:{'Content-Type':'application/json'},...(body.length?{body}:{}),signal:AbortSignal.timeout(8000)});
+   const upstream=await fetchImpl(new URL(route.slice(1),target),{method,headers:['/user/anonymous','/category'].includes(route)?{}:{'Content-Type':'application/json'},...(body.length?{body}:{}),signal:AbortSignal.timeout(8000)});
    if(!upstream.headers.get('content-type')?.includes('application/json'))return reply(502,{error:'INVALID_BACKEND_RESPONSE'});
    const payload=await upstream.json();
    return reply(upstream.status,payload);
