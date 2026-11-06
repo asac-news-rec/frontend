@@ -162,3 +162,7 @@ GET /api/v1/likes는 현재 방문자의 기사 ID 목록을 반환합니다. PO
 ## 문서 찾기
 
 내용별 문서 위치는 [문서 안내](docs/README.md)를 참고하세요.
+
+## Slack PR 알림
+
+일반 PR을 열거나 Draft PR을 Ready for review로 전환하면 GitHub Actions가 리뷰 요청을 보냅니다. 저장소의 Actions Secret에 Slack `#pr요청` 채널용 Incoming Webhook URL을 `SLACK_PR_WEBHOOK_URL` 이름으로 등록해야 합니다. 워크플로가 `main`에 반영된 뒤 발생하는 PR 이벤트부터 적용됩니다.
