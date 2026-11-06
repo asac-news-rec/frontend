@@ -44,6 +44,7 @@ ASAC 뉴스 추천 프로젝트는 독자의 뉴스 이용 데이터를 수집·
 Node.js 24.19.0 이상이 필요합니다. `README.md`가 실행 절차의 기준입니다.
 
 ```bash
+npm ci
 npm start
 npm run check
 npm test

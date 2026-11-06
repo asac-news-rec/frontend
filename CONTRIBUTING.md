@@ -20,6 +20,7 @@
 Node.js 24.19.0 이상이 필요합니다. 실제 명령과 포트는 `README.md`를 기준으로 합니다.
 
 ```bash
+npm ci
 npm start
 npm run check
 npm test
