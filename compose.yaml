@@ -5,6 +5,7 @@ services:
       - "127.0.0.1:${NEWS_PORT:-4181}:4173"
     environment:
       PUBLIC_ORIGIN: "http://127.0.0.1:${NEWS_PORT:-4181}"
+      NEWS_BACKEND_URL: ${NEWS_BACKEND_URL:-}
     volumes:
       - visitor-data:/app/data
     restart: unless-stopped
