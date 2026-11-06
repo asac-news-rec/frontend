@@ -1,14 +1,11 @@
-/** @typedef {{id:string,name:string,description:string,interests:string[],isNew:boolean}} Reader */
-/** @typedef {{id:string,title:string,summary:string,category:string,publisher:string,publishedAt:string,body:string,art:string}} Article */
-/** @type {Reader[]} */
-export const readers = [
+import type {Article, Reader} from './types.js';
+export const readers: Reader[] = [
   {id:'reader-tech',name:'김하늘',description:'새로운 기술이 궁금한 독자',interests:['IT·과학'],isNew:false},
   {id:'reader-sport',name:'이도윤',description:'경기의 안팎을 즐기는 독자',interests:['스포츠'],isNew:false},
   {id:'reader-new',name:'새로운 독자',description:'이용 이력이 없는 독자',interests:[],isNew:true}
 ];
 export const categories = ['전체','IT·과학','스포츠','문화','사회','생활'];
-/** @type {Article[]} */
-export const articles = [
+export const articles: Article[] = [
   {id:'a1',publisher:'사이뉴스 시연 편집부',title:'우리 동네 도서관에 AI 수업이 열린다면',summary:'기술을 배우는 공간이 가까워집니다. 시민을 위한 새로운 배움의 풍경을 그려봤습니다.',category:'IT·과학',publishedAt:'2026-10-29T01:00:00Z',art:'library',body:'도서관이 책을 빌리는 공간을 넘어 새로운 기술을 함께 배우는 공간으로 바뀐다면 어떨까요. 이 가상 기사에서는 시민 누구나 참여할 수 있는 AI 기초 수업을 상상해 봅니다.\n\n수업에서는 일상 속 질문을 정리하고, AI가 만든 답변을 직접 확인하는 방법을 다룹니다. 참여자는 각자의 경험을 공유하며 기술이 잘하는 일과 사람이 판단해야 할 일을 살펴봅니다.\n\n새로운 도구를 배우는 속도는 사람마다 다릅니다. 가까운 곳에서 질문할 수 있는 공간이 있다면 기술을 접하는 문턱도 조금 낮아질 것입니다.'},
   {id:'a2',publisher:'사이뉴스 시연 편집부',title:'도시의 작은 숲을 관찰하는 센서들',summary:'온도와 습도 데이터로 만나는 공원의 하루. 데이터가 일상의 환경을 읽는 방법.',category:'IT·과학',publishedAt:'2026-10-29T00:30:00Z',art:'forest',body:'공원의 나무 그늘 아래 작은 센서가 놓여 있습니다. 이 가상 이야기 속 센서는 시간에 따라 달라지는 온도와 습도를 기록합니다.\n\n그늘과 햇빛이 드는 길의 차이를 비교하면 시민이 쉬어갈 공간을 생각하는 데 도움이 될 수 있습니다. 숫자를 모으는 일뿐 아니라 센서의 위치와 측정 조건을 함께 남기는 일도 필요합니다.\n\n이 기사는 실제 관측 결과가 아닙니다. 환경 데이터가 도시 생활과 연결되는 모습을 설명하기 위한 예시입니다.'},
   {id:'a3',publisher:'사이뉴스 시연 편집부',title:'주말의 달리기, 기록보다 오래 남는 것',summary:'나란히 뛰는 사람들이 만드는 동네의 리듬. 처음 달리는 사람도 함께하는 러닝 모임.',category:'스포츠',publishedAt:'2026-10-28T23:30:00Z',art:'running',body:'이른 아침 공원에 사람들이 하나둘 모입니다. 빠른 기록보다 함께 출발하고 돌아오는 경험을 중요하게 여기는 가상의 러닝 모임입니다.\n\n처음 온 사람은 짧은 코스로 시작하고, 익숙한 사람은 자신의 속도를 조절해 동료와 함께 달립니다. 모임이 끝나면 오늘의 컨디션과 다음에 달리고 싶은 길을 이야기합니다.\n\n운동의 경험은 기록표만으로 설명되지 않습니다. 이 가상 기사는 일상 속 스포츠의 즐거움을 주제로 구성했습니다.'},
@@ -18,7 +15,7 @@ export const articles = [
   {id:'a7',publisher:'사이뉴스 시연 편집부',title:'계절을 담은 한 끼, 냉장고에서 시작하기',summary:'남은 재료를 살피는 작은 습관. 오늘의 식탁을 가볍게 준비하는 아이디어.',category:'생활',publishedAt:'2026-10-28T19:00:00Z',art:'food',body:'장을 보기 전에 냉장고 안을 먼저 살펴봅니다. 남은 채소와 곡물을 조합해 한 끼를 만드는 일상을 가상으로 담았습니다.\n\n재료 목록을 적어두면 무엇을 먼저 먹을지 정하기 편합니다. 조리 시간과 취향에 따라 단순한 메뉴를 고르는 것만으로도 식사 준비의 부담을 줄일 수 있습니다.\n\n본문은 일반적인 생활 장면을 담은 창작 예시입니다.'},
   {id:'a8',publisher:'사이뉴스 시연 편집부',title:'별을 보는 밤, 화면 밖으로 시선을 옮기다',summary:'밤하늘을 함께 바라보는 시간. 새로운 취미가 일상에 질문을 더하는 순간.',category:'IT·과학',publishedAt:'2026-10-28T18:00:00Z',art:'space',body:'가상의 천문 모임이 도시 외곽에서 밤하늘을 바라봅니다. 누군가는 별자리를 찾고 누군가는 눈에 보이는 밝기의 차이를 묻습니다.\n\n관찰 기록에는 날짜와 날씨, 주변의 밝기를 적습니다. 같은 하늘도 관측 조건에 따라 다르게 보이기 때문입니다.\n\n이 글은 실제 관측 행사나 천문 현상의 일정 안내가 아닙니다.'}
 ];
-export const sampleOrders = {
+export const sampleOrders: Record<string, string[]> = {
   'reader-tech':['a1','a2','a8','a6','a5','a3','a7','a4'],
   'reader-sport':['a3','a4','a6','a7','a1','a5','a2','a8'],
   'reader-new':['a1','a2','a3','a4','a5','a6','a7','a8']

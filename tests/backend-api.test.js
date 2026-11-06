@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {getBackendReaderId,getBackendPage,changeBackendLike} from '../src/backend-api.js';
+import {getBackendReaderId,getBackendPage,changeBackendLike} from '../dist/src/backend-api.js';
 
 const readerId='019a4c00-0000-7000-8000-000000000001';
 const article=(position,id)=>({article_id:id,impression_id:`imp-${position}`,position,title:`기사 ${position}`,

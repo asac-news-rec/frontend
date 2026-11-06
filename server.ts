@@ -1,7 +1,7 @@
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
-import {createNewsServer} from './server/http.mjs';
-const root = fileURLToPath(new URL('.', import.meta.url));
+import {createNewsServer} from './server/http.js';
+const root = path.resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
 const port = Number(process.env.PORT || 4173);
 const origin = process.env.PUBLIC_ORIGIN || `http://127.0.0.1:${port}`;
 const {server, close} = createNewsServer({root, origin, database: process.env.VISITOR_DB || path.join(root, 'data', 'visitors.sqlite'), backendBaseUrl: process.env.NEWS_BACKEND_URL});
