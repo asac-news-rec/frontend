@@ -8,6 +8,7 @@
 
 ```powershell
 $env:NEWS_BACKEND_URL='http://127.0.0.1:8000/'
+npm ci
 npm start
 ```
 
@@ -28,10 +29,9 @@ DB의 `image_url`이 백엔드 저장소의 기본값인 `http://localhost:8001/
 태원님 PC에서는 다음 순서대로 확인할 수 있습니다. 프론트엔드와 백엔드 저장소는 같은 PC에 두고 Docker Desktop을 실행합니다.
 
 1. 백엔드 저장소의 안내에 따라 API와 DB를 먼저 실행합니다. 브라우저에서 `http://127.0.0.1:8000/health`가 `{"status":"ok","database":1}`을 반환하고 기사 데이터가 적재되어 있어야 합니다.
-2. 프론트엔드 저장소에서 `feat/7-backend-integration` 브랜치로 전환한 뒤 아래 명령을 실행합니다.
+2. 프론트엔드 저장소에서 아래 명령을 실행합니다.
 
 ```powershell
-git switch feat/7-backend-integration
 $env:NEWS_BACKEND_URL='http://host.docker.internal:8000/'
 docker compose up -d --build --wait
 ```
@@ -77,9 +77,10 @@ node scripts/verify-docker.mjs
 
 ## 실행
 
-Node.js 24.19.0 이상이 필요합니다. 내장 node:sqlite를 사용합니다. 외부 패키지 설치가 필요하지 않습니다.
+Node.js 24.19.0 이상이 필요합니다. 방문자 저장에는 내장 node:sqlite를 사용합니다. TypeScript 컴파일러 설치를 위해 처음 실행할 때 `npm ci`가 필요합니다.
 
 ```powershell
+npm ci
 npm start
 ```
 
@@ -91,7 +92,7 @@ npm test
 npm run build
 ```
 
-`dist/`는 정적 호스팅용 결과물입니다. 화면은 HTML, CSS, JavaScript로 제공하지만 방문자 저장 기능에는 Node 서버가 필요합니다. 정적 호스팅만으로 방문자 API는 실행되지 않습니다. 해시 경로를 사용하므로 기사 상세 새로고침을 위한 별도 서버 라우팅은 필요하지 않습니다.
+`dist/`에는 화면 파일과 서버가 사용하는 컴파일된 JavaScript가 들어갑니다. 브라우저와 Node 서버의 소스는 TypeScript이며, 빌드·검증 도구와 테스트는 JavaScript로 실행합니다. `npm start`와 `npm test`는 시작 전에 빌드합니다. 서버를 직접 실행하려면 먼저 `npm run build`를 실행한 뒤 `node dist/server.js`를 사용합니다. 방문자 저장 기능에는 Node 서버가 필요하며 정적 호스팅만으로 방문자 API는 실행되지 않습니다. 해시 경로를 사용하므로 기사 상세 새로고침을 위한 별도 서버 라우팅은 필요하지 않습니다.
 
 ## 화면 확인 순서
 
@@ -108,11 +109,11 @@ npm run build
 
 | 파일 | 역할 |
 |---|---|
-| src/data.js | 가상 독자 3명, 가상 기사 8개, 독자별 샘플 순서와 JSDoc 자료형 |
-| src/service.js | 샘플 조회와 추천 묶음 생성. 실제 API 교체 위치 |
-| src/app.js | 화면 상태, 독자·카테고리 전환, 기사 상세, 안전한 본문 출력 |
+| src/data.ts | 가상 독자 3명, 가상 기사 8개, 독자별 샘플 순서와 TypeScript 타입 |
+| src/service.ts | 샘플 조회와 추천 묶음 생성. 실제 API 교체 위치 |
+| src/app.ts | 화면 상태, 독자·카테고리 전환, 기사 상세, 안전한 본문 출력 |
 | src/style.css | 반응형 레이아웃, CSS 그래픽, 키보드 포커스 |
-| server.mjs | 외부 의존성 없는 로컬 서버 |
+| server.ts, server/*.ts | Node 서버와 API·방문자 저장 소스. 빌드 후 dist/server.js로 실행 |
 | tests/feed.test.js | 독자별 차이, 신규 독자 정렬, 필터, 오류·빈 결과·복구 검증 |
 | DESIGN_NOTES.md | 구현 내용, 선택 이유, 팀 피드백 질문과 제한 |
 

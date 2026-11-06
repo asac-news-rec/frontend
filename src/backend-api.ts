@@ -1,8 +1,24 @@
+interface BackendArticle {
+  article_id: string;
+  impression_id: string;
+  position: number;
+  title: string;
+  paragraphs: string[];
+  category: string;
+  published_at: string;
+  is_synthetic: boolean;
+  is_liked: boolean;
+  summary?: string | null;
+  publisher?: string | null;
+  image_url?: string | null;
+  image_caption?: string | null;
+}
+
 const storageKey='sai-news.backend-reader-id';
 const legacyStorageKey='sai-news.backend-user-id';
 const uuid7=/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-async function request(route,body,method='POST',fetchImpl=fetch){
+async function request(route: string,body: object | undefined,method='POST',fetchImpl=fetch){
  const response=await fetchImpl('/api/v1/backend'+route,{method,credentials:'same-origin',cache:'no-store',
   ...(body===undefined?{}:{headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})});
  if(!response.ok)throw new Error(`BACKEND_HTTP_${response.status}`);
@@ -22,7 +38,7 @@ export async function getBackendReaderId({storage=globalThis.window?.localStorag
    return legacy;
   }
   const result=await request('/user/anonymous',undefined,'POST',fetchImpl);
-  if(!uuid7.test(result?.reader_id))throw new Error('INVALID_BACKEND_READER_ID');
+  if(!(typeof result?.reader_id==='string'&&uuid7.test(result.reader_id)))throw new Error('INVALID_BACKEND_READER_ID');
   storage.setItem(storageKey,result.reader_id);
   if(storage.getItem(storageKey)!==result.reader_id)throw new Error('BACKEND_ID_STORAGE_UNAVAILABLE');
   return result.reader_id;
@@ -32,13 +48,13 @@ export async function getBackendReaderId({storage=globalThis.window?.localStorag
 
 export async function getBackendPage(offset=0,{fetchImpl=fetch,getReaderId=getBackendReaderId}={}){
  const readerId=await getReaderId();
- const response=await request('/news/feed',{reader_id:readerId,offset},'POST',fetchImpl);
+ const response: {reader_id?: string; request_id: string; served_at: string; items: BackendArticle[]; next_offset: number | null}=await request('/news/feed',{reader_id:readerId,offset},'POST',fetchImpl);
  if(!response||(response.reader_id!==undefined&&response.reader_id!==readerId)||typeof response.request_id!=='string'||!Number.isFinite(Date.parse(response.served_at))||
-  !Array.isArray(response.items)||!(response.next_offset===null||Number.isSafeInteger(response.next_offset)&&response.next_offset>=0))throw new Error('INVALID_BACKEND_FEED');
- const items=response.items.map(item=>{
+  !Array.isArray(response.items)||!(response.next_offset===null||typeof response.next_offset==='number'&&Number.isSafeInteger(response.next_offset)&&response.next_offset>=0))throw new Error('INVALID_BACKEND_FEED');
+ const items=response.items.map((item: BackendArticle)=>{
   if(!item||typeof item.article_id!=='string'||typeof item.impression_id!=='string'||
    !Number.isSafeInteger(item.position)||item.position<1||typeof item.title!=='string'||
-   !Array.isArray(item.paragraphs)||item.paragraphs.some(value=>typeof value!=='string')||
+   !Array.isArray(item.paragraphs)||item.paragraphs.some((value: unknown)=>typeof value!=='string')||
    typeof item.category!=='string'||!Number.isFinite(Date.parse(item.published_at))||
    typeof item.is_synthetic!=='boolean'||typeof item.is_liked!=='boolean')throw new Error('INVALID_BACKEND_ARTICLE');
   const article={id:item.article_id,title:item.title,summary:item.summary??'',paragraphs:item.paragraphs,
@@ -51,7 +67,7 @@ export async function getBackendPage(offset=0,{fetchImpl=fetch,getReaderId=getBa
   items,nextOffset:response.next_offset};
 }
 
-export async function changeBackendLike(articleId,liked,{fetchImpl=fetch,getReaderId=getBackendReaderId}={}){
+export async function changeBackendLike(articleId: string,liked: boolean,{fetchImpl=fetch,getReaderId=getBackendReaderId}={}){
  const readerId=await getReaderId();
  const result=await request(`/news/${encodeURIComponent(articleId)}/like`,{reader_id:readerId},liked?'PUT':'DELETE',fetchImpl);
  if(!result||result.article_id!==articleId||result.is_liked!==liked||typeof result.changed!=='boolean')throw new Error('INVALID_BACKEND_LIKE');

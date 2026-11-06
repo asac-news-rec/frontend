@@ -1,21 +1,22 @@
-import {createVisitorFeed} from './feed.mjs';
+import {createVisitorFeed} from './feed.js';
 import {categories,articles} from '../src/data.js';
 import http from 'node:http';
+import type {ServerResponse} from 'node:http';
 import {readFile} from 'node:fs/promises';
 import path from 'node:path';
-import {openVisitors} from './visitors.mjs';
-import {createBackendProxy} from './backend-proxy.mjs';
+import {openVisitors} from './visitors.js';
+import {createBackendProxy} from './backend-proxy.js';
 
-export function createNewsServer({root, origin, database, now, backendBaseUrl}) {
+export function createNewsServer({root, origin, database, now, backendBaseUrl}:{root:string;origin:string;database:string;now?:()=>number;backendBaseUrl?:string}) {
   const backendProxy=createBackendProxy({baseUrl:backendBaseUrl,origin});
   const visitors = openVisitors(database, now);
   const secure = new URL(origin).protocol === 'https:';
   const cookieName = secure ? '__Host-news_visitor' : 'news_visitor';
-  const cookie = (value, seconds) => `${cookieName}=${value}; Path=/; Max-Age=${seconds}; HttpOnly; SameSite=Lax${secure ? '; Secure' : ''}`;
-  const respond = (res, status, data) => {res.writeHead(status, {'Content-Type':'application/json; charset=utf-8', 'Cache-Control':'private, no-store'}); res.end(JSON.stringify(data));};
+  const cookie = (value:string, seconds:number) => `${cookieName}=${value}; Path=/; Max-Age=${seconds}; HttpOnly; SameSite=Lax${secure ? '; Secure' : ''}`;
+  const respond = (res:ServerResponse, status:number, data:unknown) => {res.writeHead(status, {'Content-Type':'application/json; charset=utf-8', 'Cache-Control':'private, no-store'}); res.end(JSON.stringify(data));};
   const server = http.createServer(async (req, res) => {
     try {
-      const pathname = new URL(req.url, origin).pathname;
+      const pathname = new URL(req.url ?? '/', origin).pathname;
       if (pathname.startsWith('/api/')) {
         if(await backendProxy(req,res,pathname))return;
         res.setHeader('Cache-Control', 'private, no-store');
@@ -39,15 +40,15 @@ export function createNewsServer({root, origin, database, now, backendBaseUrl}) 
         }
         if (req.method !== 'POST' || !mutations.has(pathname)) return respond(res, 404, {error:'NOT_FOUND'});
         if (req.headers['content-type']?.split(';')[0] !== 'application/json') return respond(res, 415, {error:'JSON_REQUIRED'});
-        const chunks = [];
+        const chunks:Buffer[] = [];
         let size = 0;
         for await (const chunk of req) {
           size += chunk.length;
           if (size > 4096) return respond(res, 413, {error:'BODY_TOO_LARGE'});
           chunks.push(chunk);
         }
-        let input;
-        try {input = JSON.parse(Buffer.concat(chunks).toString('utf8'));} catch {return respond(res, 400, {error:'INVALID_JSON'});}
+        let input:Record<string,unknown>;
+        try {input = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string,unknown>;} catch {return respond(res, 400, {error:'INVALID_JSON'});}
         if (!input || Array.isArray(input) || typeof input !== 'object') return respond(res, 400, {error:'INVALID_BODY'});
         const expectedKeys = pathname === '/api/v1/likes' ? ['article_id','liked'] : [];
         if (Object.keys(input).some(key => !expectedKeys.includes(key))) return respond(res, 400, {error:'UNKNOWN_FIELD'});
@@ -75,13 +76,13 @@ export function createNewsServer({root, origin, database, now, backendBaseUrl}) 
       const decoded = decodeURIComponent(pathname);
       const allowed = decoded === '/' || decoded === '/index.html' || /^\/src\/[a-zA-Z0-9_-]+\.(js|css)$/.test(decoded);
       if (!allowed) {res.writeHead(404); return res.end('Not found');}
-      const target = path.join(root, decoded === '/' ? 'index.html' : decoded.slice(1));
+      const target = path.join(root, 'dist', decoded === '/' ? 'index.html' : decoded.slice(1));
       const data = await readFile(target);
-      const mime = {'.html':'text/html', '.css':'text/css', '.js':'text/javascript'};
+      const mime:Record<string,string> = {'.html':'text/html', '.css':'text/css', '.js':'text/javascript'};
       res.writeHead(200, {'Content-Type':`${mime[path.extname(target)]}; charset=utf-8`, 'Cache-Control':'no-store', 'X-Content-Type-Options':'nosniff'});
       res.end(req.method === 'HEAD' ? undefined : data);
     } catch (error) {
-      if (error.code === 'ENOENT') {res.writeHead(404); res.end('Not found');}
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {res.writeHead(404); res.end('Not found');}
       else if (!res.headersSent) respond(res, 500, {error:'SERVER_ERROR'});
       else res.end();
     }

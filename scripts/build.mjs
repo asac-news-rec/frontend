@@ -1,5 +1,5 @@
-import {mkdir,copyFile,cp} from 'node:fs/promises';
+import {mkdir,copyFile} from 'node:fs/promises';
 await mkdir('dist',{recursive:true});
 await copyFile('index.html','dist/index.html');
-await cp('src','dist/src',{recursive:true});
+await copyFile('src/style.css','dist/src/style.css');
 console.log('Static build ready: dist/');
