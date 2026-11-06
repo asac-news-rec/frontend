@@ -6,6 +6,7 @@
 
 ```powershell
 $env:NEWS_BACKEND_URL='http://127.0.0.1:8000/'
+npm ci
 npm start
 ```
 
@@ -106,9 +107,9 @@ npm run build
 
 | 파일 | 역할 |
 |---|---|
-| src/data.js | 가상 독자 3명, 가상 기사 8개, 독자별 샘플 순서와 JSDoc 자료형 |
-| src/service.js | 샘플 조회와 추천 묶음 생성. 실제 API 교체 위치 |
-| src/app.js | 화면 상태, 독자·카테고리 전환, 기사 상세, 안전한 본문 출력 |
+| src/data.ts | 가상 독자 3명, 가상 기사 8개, 독자별 샘플 순서와 TypeScript 타입 |
+| src/service.ts | 샘플 조회와 추천 묶음 생성. 실제 API 교체 위치 |
+| src/app.ts | 화면 상태, 독자·카테고리 전환, 기사 상세, 안전한 본문 출력 |
 | src/style.css | 반응형 레이아웃, CSS 그래픽, 키보드 포커스 |
 | server.mjs | 외부 의존성 없는 로컬 서버 |
 | tests/feed.test.js | 독자별 차이, 신규 독자 정렬, 필터, 오류·빈 결과·복구 검증 |

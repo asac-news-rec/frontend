@@ -1,5 +1,5 @@
 import {createVisitorFeed} from './feed.mjs';
-import {categories,articles} from '../src/data.js';
+import {categories,articles} from '../dist/src/data.js';
 import http from 'node:http';
 import {readFile} from 'node:fs/promises';
 import path from 'node:path';
@@ -75,7 +75,7 @@ export function createNewsServer({root, origin, database, now, backendBaseUrl}) 
       const decoded = decodeURIComponent(pathname);
       const allowed = decoded === '/' || decoded === '/index.html' || /^\/src\/[a-zA-Z0-9_-]+\.(js|css)$/.test(decoded);
       if (!allowed) {res.writeHead(404); return res.end('Not found');}
-      const target = path.join(root, decoded === '/' ? 'index.html' : decoded.slice(1));
+      const target = path.join(root, 'dist', decoded === '/' ? 'index.html' : decoded.slice(1));
       const data = await readFile(target);
       const mime = {'.html':'text/html', '.css':'text/css', '.js':'text/javascript'};
       res.writeHead(200, {'Content-Type':`${mime[path.extname(target)]}; charset=utf-8`, 'Cache-Control':'no-store', 'X-Content-Type-Options':'nosniff'});

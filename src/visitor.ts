@@ -1,11 +1,12 @@
+import type {VisitorProfile} from './types.js';
 
-const panel = document.querySelector('#visitor');
-let profile = null;
+const panel = document.querySelector('#visitor')!;
+let profile: VisitorProfile | null = null;
 let message = '';
 let busy = false;
-const escape = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[c]));
+const escape = (value: unknown) => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[c as '&' | '<' | '>' | '"' | "'"]));
 
-async function api(action, body) {
+async function api(action: 'me' | 'bootstrap' | 'reset', body?: object): Promise<VisitorProfile | null> {
   const response = await fetch(`/api/v1/visitors/${action}`, {
     method:body === undefined ? 'GET' : 'POST', credentials:'same-origin', cache:'no-store',
     headers:body === undefined ? {} : {'Content-Type':'application/json'},
@@ -25,7 +26,7 @@ function render() {
       <p>이 브라우저의 좋아요를 피드 정렬에 참고합니다. 기사는 가상 데이터이며 학습 모델은 아직 연결하지 않았습니다.</p>` :
       '<button id="visitor-start">이 브라우저에서 저장 시작</button><p>저장하지 않아도 아래 가상 뉴스 화면을 둘러볼 수 있습니다.</p>'}
     <p role="status">${escape(message)}</p>`;
-  panel.querySelectorAll('button, input').forEach(element => {element.disabled = busy;});
+  panel.querySelectorAll<HTMLButtonElement | HTMLInputElement>('button, input').forEach(element => {element.disabled = busy;});
   panel.querySelector('#visitor-start')?.addEventListener('click', () => run(async () => {
     const start = async () => {
       const existing = await api('me');
@@ -44,12 +45,12 @@ function render() {
   }));
 }
 
-async function run(action) {
+async function run(action: () => Promise<void>) {
   if (busy) return;
   const previousId=profile?.reader_id;
   busy = true;
   render();
-  try {await action();} catch (error) {message = error.message;}
+  try {await action();} catch (error) {message = error instanceof Error ? error.message : String(error);}
   finally {busy = false; render();if(previousId!==profile?.reader_id)window.dispatchEvent(new Event('visitor-changed'));}
 }
 

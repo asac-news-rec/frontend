@@ -1,4 +1,4 @@
-import {articles} from '../src/data.js';
+import {articles} from '../dist/src/data.js';
 export function createVisitorFeed({readerId=null,likedIds=[],now=Date.now()}) {
   const cutoff=new Date(now).toISOString();
   const available=articles.filter(article=>article.publishedAt<=cutoff);
