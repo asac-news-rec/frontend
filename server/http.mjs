@@ -4,8 +4,10 @@ import http from 'node:http';
 import {readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {openVisitors} from './visitors.mjs';
+import {createBackendProxy} from './backend-proxy.mjs';
 
-export function createNewsServer({root, origin, database, now}) {
+export function createNewsServer({root, origin, database, now, backendBaseUrl}) {
+  const backendProxy=createBackendProxy({baseUrl:backendBaseUrl,origin});
   const visitors = openVisitors(database, now);
   const secure = new URL(origin).protocol === 'https:';
   const cookieName = secure ? '__Host-news_visitor' : 'news_visitor';
@@ -15,6 +17,7 @@ export function createNewsServer({root, origin, database, now}) {
     try {
       const pathname = new URL(req.url, origin).pathname;
       if (pathname.startsWith('/api/')) {
+        if(await backendProxy(req,res,pathname))return;
         res.setHeader('Cache-Control', 'private, no-store');
         if (req.method === 'GET' && pathname === '/api/v1/categories') return respond(res, 200, {data:categories});
         const mutations = new Set(['/api/v1/visitors/bootstrap', '/api/v1/visitors/reset', '/api/v1/likes']);

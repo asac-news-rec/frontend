@@ -1,0 +1,54 @@
+name: Experiment
+description: 프론트엔드 동작, 수집 방식 또는 화면 설계 가설을 검증합니다.
+title: "[EXP] "
+labels: ["experiment"]
+body:
+  - type: textarea
+    id: hypothesis
+    attributes:
+      label: 가설
+      description: 관찰로 판정할 수 있는 가설을 적어 주세요.
+    validations:
+      required: true
+  - type: input
+    id: target
+    attributes:
+      label: 실험 대상
+      placeholder: 예) 피드 노출 이벤트 중복 처리
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: 영역
+      options:
+        - 화면과 접근성
+        - 피드와 추천 근거
+        - 방문자 식별
+        - 행동 이벤트 수집
+        - API 계약
+        - 성능
+        - 기타
+    validations:
+      required: true
+  - type: textarea
+    id: criterion
+    attributes:
+      label: 판정 기준
+      description: 입력, 측정 방법, 성공과 실패 기준을 적어 주세요.
+    validations:
+      required: true
+  - type: textarea
+    id: setup
+    attributes:
+      label: 실험 설정
+      description: 가상 데이터와 실제 데이터의 구분, 개인정보 보호와 재현 절차를 적어 주세요.
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: 결과
+      description: 측정 결과와 후속 작업을 실험 후 기록해 주세요.
+    validations:
+      required: false
