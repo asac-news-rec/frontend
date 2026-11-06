@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
-import {createBackendProxy} from '../server/backend-proxy.mjs';
+import {createBackendProxy} from '../dist/server/backend-proxy.js';
 
 test('같은 출처 프록시는 태원님 API의 경로·method·본문을 유지한다',async t=>{
  const received=[];

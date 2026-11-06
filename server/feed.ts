@@ -1,8 +1,8 @@
 import {articles} from '../src/data.js';
-export function createVisitorFeed({readerId=null,likedIds=[],now=Date.now()}) {
+export function createVisitorFeed({readerId=null,likedIds=[],now=Date.now()}:{readerId?:string|null;likedIds?:string[];now?:number}={}) {
   const cutoff=new Date(now).toISOString();
   const available=articles.filter(article=>article.publishedAt<=cutoff);
-  const preferences=new Map();
+  const preferences=new Map<string,number>();
   const liked=new Set(likedIds);
   for(const article of available)if(liked.has(article.id))preferences.set(article.category,(preferences.get(article.category)||0)+1);
   const strategy=preferences.size?'liked_categories':'latest';

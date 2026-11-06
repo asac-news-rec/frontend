@@ -10,7 +10,7 @@
 
 ## 구조와 선택 이유
 
-화면은 기존 src/app.js의 가상 독자 흐름을 유지한다. 별도 src/visitor.js가 프로필 조회와 안내를 담당한다. server/http.mjs는 요청과 쿠키 검증을 처리하고 server/visitors.mjs는 SQLite 조회·생성·삭제를 담당한다.
+화면은 기존 src/app.ts의 가상 독자 흐름을 유지한다. 별도 src/visitor.ts가 프로필 조회와 안내를 담당한다. server/http.ts는 요청과 쿠키 검증을 처리하고 server/visitors.ts는 SQLite 조회·생성·삭제를 담당한다.
 
 JSON 파일 전체를 갱신하는 구조와 SQLite를 비교했다. 동시 요청의 저장 유실을 피하고 서버 재시작 후에도 지속되도록 SQLite를 선택했다. 방문자와 토큰의 관계가 현재 일대일이므로 하나의 visitors 테이블로 구현했다. 여러 기기나 토큰 교체를 지원할 때는 별도 토큰 테이블로 분리해야 한다. 회의 청사진의 논리 설계와 물리 구현의 차이이며 여러 기기 식별은 이번 범위가 아니다.
 
@@ -40,7 +40,8 @@ npm start
 
 ```powershell
 $env:PORT='4181'
-node server.mjs
+npm ci
+npm start
 ```
 
 VISITOR_DB로 DB 경로를, PUBLIC_ORIGIN으로 브라우저가 접근하는 정확한 출처를 지정할 수 있다. 예를 들어 localhost와 127.0.0.1은 다른 출처이므로 설정한 주소로 접속해야 한다. PUBLIC_ORIGIN에 HTTPS 주소를 지정하면 __Host-news_visitor 쿠키와 Secure를 적용한다. 이 변수만으로 서버가 HTTPS를 제공하지는 않는다. HTTPS 종료 프록시가 필요하며 서버는 로컬 인터페이스에만 바인딩한다. 프록시는 Host·Origin을 임의로 바꾸지 않도록 구성한다.
