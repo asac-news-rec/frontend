@@ -32,6 +32,7 @@ function card(item: FeedItem){const a=item.article;return `<div class="news-row"
 function render(){
   observer?.disconnect();
   if(state.articleId){renderArticle();return;}
+  const restoreSubcategoryFocus=document.activeElement?.id==='subcategory';
   const personal=state.feed?.strategy==='liked_categories';
   main.innerHTML=`<section class="intro"><div><div class="overline">YOUR DAILY PERSPECTIVE</div><h1>오늘의 세상,<br><em>나의 관심사</em>로 읽다.</h1><p>새로운 소식과 뜻밖의 발견을 한곳에서 만나보세요.</p></div><div class="intro-aside"><span class="edition">SAI NEWS / FIRST EDITION</span><div class="edition-line"></div><p>하나의 세상,<br>서로 다른 시선.</p><span class="edition">PERSONALIZED READING</span></div></section>
   ${backendMode?'':`<aside class="new-reader"><strong>${personal?'좋아요를 바탕으로 고른 뉴스':'새로운 소식부터 둘러보세요'}</strong><span>${personal?'좋아요한 기사의 카테고리를 먼저 보여드려요.':'좋아요 이력이 없으면 최신순으로 보여드려요.'}</span></aside>`}
@@ -44,7 +45,8 @@ function render(){
   main.querySelectorAll<HTMLButtonElement>('[data-category]').forEach(b=>b.onclick=()=>{state.category=b.dataset.category ?? state.category;state.subcategory='전체';subcategories=[];load();if(backendMode&&state.category!=='전체')loadSubcategories(state.category);});
   main.querySelector<HTMLSelectElement>('#subcategory')?.addEventListener('change',event=>{state.subcategory=(event.target as HTMLSelectElement).value;load();});
   main.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach(b=>b.onclick=()=>{state.mode=b.dataset.mode as FeedMode;load();});
-  main.querySelector('#category-retry')?.addEventListener('click',()=>{if(backendMode&&state.category!=='전체')loadSubcategories(state.category);else initialize();});
+  main.querySelector('#category-retry')?.addEventListener('click',()=>{if(!backendMode)initialize();else if(state.category==='전체')loadCategories();else loadSubcategories(state.category);});
+  if(restoreSubcategoryFocus)main.querySelector<HTMLSelectElement>('#subcategory')?.focus({preventScroll:true});
   connectMore();
   const retry=main.querySelector<HTMLButtonElement>('#retry');if(retry)retry.onclick=()=>{state.mode='normal';load();};
 }
@@ -98,8 +100,22 @@ async function load(){
   catch(error){if(token!==state.request)return;state.status='error';state.error=error instanceof Error ? error.message : String(error);}
   render();
 }
+async function loadCategories(){
+  try{
+    categories=['전체',...await getBackendCategories()];
+    categoryError='';
+  }catch(error){
+    categoryError='카테고리를 불러오지 못했습니다.';
+  }
+  render();
+}
 async function initialize(){
-  try{categories=backendMode?['전체',...await getBackendCategories()]:await getCategories();categoryError='';if(!categories.includes(state.category))state.category=categories[0];await load();}
+  if(backendMode){
+    categories=['전체'];
+    await Promise.all([load(),loadCategories()]);
+    return;
+  }
+  try{categories=await getCategories();categoryError='';if(!categories.includes(state.category))state.category=categories[0];await load();}
   catch(error){categoryError=error instanceof Error ? error.message : String(error);state.status='error';state.error=error instanceof Error ? error.message : String(error);render();}
 }
 async function loadSubcategories(category: string){
