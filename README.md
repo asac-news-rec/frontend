@@ -2,7 +2,7 @@
 
 ## 실제 뉴스 백엔드 화면 확인
 
-백엔드 저장소의 API(`POST /user/anonymous`, `POST /news/feed`, `PUT/DELETE /news/{article_id}/like`)를 같은 출처의 Node 서버 프록시로 연결합니다. 백엔드 API가 `127.0.0.1:8000`에서 실행 중이면 다음과 같이 시작합니다.
+백엔드 저장소의 API(`POST /user/anonymous`, `POST /category`, `POST /subcategory`, `POST /news/feed`, `PUT/DELETE /news/{article_id}/like`)를 같은 출처의 Node 서버 프록시로 연결합니다. 백엔드 API가 `127.0.0.1:8000`에서 실행 중이면 다음과 같이 시작합니다.
 
 ```powershell
 $env:NEWS_BACKEND_URL='http://127.0.0.1:8000/'
@@ -13,6 +13,8 @@ npm start
 브라우저에서 `http://127.0.0.1:4173/`을 엽니다. 기본 화면이 백엔드 피드를 사용합니다. 백엔드의 Nginx `127.0.0.1:8080`을 사용할 때는 `NEWS_BACKEND_URL='http://127.0.0.1:8080/api/'`로 설정합니다. Docker 프론트엔드에서 호스트의 백엔드로 접근할 때는 `NEWS_BACKEND_URL='http://host.docker.internal:8000/'`을 설정하고 `docker compose up -d --build --wait`로 실행합니다. 실제 접속 주소는 이 PC와 백엔드 담당자가 접근 가능한 호스트 주소에 맞춰야 합니다. 기존 샘플 화면은 `/?feed=sample`에서 별도로 확인할 수 있습니다.
 
 DB의 `image_url`이 백엔드 저장소의 기본값인 `http://localhost:8001/`을 가리키면 아래 Docker 실행 절차의 이미지 서버도 켭니다. 이미지가 없거나 접근할 수 없으면 화면은 기존 일러스트를 표시합니다.
+
+카테고리는 본문 없는 `POST /category`로 조회하고, 카테고리를 고르면 `{category}`를 담은 `POST /subcategory`로 소분류를 조회합니다. 피드에는 선택한 `category`, `subcategory`를 전달합니다. 필터를 바꾸면 `offset: 0`에서 다시 시작하고, 다음 페이지에는 동일한 필터와 응답의 `next_offset`을 사용합니다. 선택하지 않은 필터는 요청에서 생략합니다. 카테고리 조회에 실패해도 전체 뉴스는 표시되며, 다시 시도 버튼으로 카테고리만 다시 불러올 수 있습니다.
 
 백엔드 모드는 브라우저에 `reader_id`를 저장하며 백엔드 피드의 `items`, `next_offset`, `is_liked`를 화면에 사용합니다. 목록은 백엔드의 최신순이며 학습된 추천 순위가 아닙니다. 백엔드 기사는 상세 새로고침 시 목록 캐시가 없어 다시 피드에서 열어야 합니다. 이 모드의 좋아요는 백엔드 API에 저장됩니다. 이전 샘플 화면의 방문자 쿠키와 로컬 SQLite 좋아요는 별도입니다. 실제 백엔드와 DB가 기동되지 않았다면 연결 오류를 표시하며 샘플 기사로 대체하지 않습니다.
 
@@ -160,3 +162,7 @@ GET /api/v1/likes는 현재 방문자의 기사 ID 목록을 반환합니다. PO
 ## 문서 찾기
 
 내용별 문서 위치는 [문서 안내](docs/README.md)를 참고하세요.
+
+## Slack PR 알림
+
+일반 PR을 열거나 Draft PR을 Ready for review로 전환하면 GitHub Actions가 리뷰 요청을 보냅니다. 저장소의 Actions Secret에 Slack `#pr요청` 채널용 Incoming Webhook URL을 `SLACK_PR_WEBHOOK_URL` 이름으로 등록해야 합니다. 워크플로가 `main`에 반영된 뒤 발생하는 PR 이벤트부터 적용됩니다.
