@@ -44,7 +44,7 @@ function render(){
   main.querySelectorAll<HTMLButtonElement>('[data-category]').forEach(b=>b.onclick=()=>{state.category=b.dataset.category ?? state.category;state.subcategory='전체';subcategories=[];load();if(backendMode&&state.category!=='전체')loadSubcategories(state.category);});
   main.querySelector<HTMLSelectElement>('#subcategory')?.addEventListener('change',event=>{state.subcategory=(event.target as HTMLSelectElement).value;load();});
   main.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach(b=>b.onclick=()=>{state.mode=b.dataset.mode as FeedMode;load();});
-  main.querySelector('#category-retry')?.addEventListener('click',initialize);
+  main.querySelector('#category-retry')?.addEventListener('click',()=>{if(backendMode&&state.category!=='전체')loadSubcategories(state.category);else initialize();});
   connectMore();
   const retry=main.querySelector<HTMLButtonElement>('#retry');if(retry)retry.onclick=()=>{state.mode='normal';load();};
 }
