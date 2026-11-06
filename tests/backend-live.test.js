@@ -6,7 +6,7 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createNewsServer} from '../server/http.mjs';
+import {createNewsServer} from '../dist/server/http.js';
 
 test('화면 서버가 백엔드 발급·피드·좋아요를 같은 출처에서 제공한다',async t=>{
  const calls=[];

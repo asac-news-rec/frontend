@@ -90,7 +90,7 @@ npm test
 npm run build
 ```
 
-`dist/`에는 화면 파일과 서버가 사용하는 컴파일된 JavaScript가 들어갑니다. `npm start`와 `npm test`는 시작 전에 빌드합니다. `node server.mjs`를 직접 실행하려면 먼저 `npm run build`를 실행해야 합니다. 방문자 저장 기능에는 Node 서버가 필요하며 정적 호스팅만으로 방문자 API는 실행되지 않습니다. 해시 경로를 사용하므로 기사 상세 새로고침을 위한 별도 서버 라우팅은 필요하지 않습니다.
+`dist/`에는 화면 파일과 서버가 사용하는 컴파일된 JavaScript가 들어갑니다. 브라우저와 Node 서버의 소스는 TypeScript이며, 빌드·검증 도구와 테스트는 JavaScript로 실행합니다. `npm start`와 `npm test`는 시작 전에 빌드합니다. 서버를 직접 실행하려면 먼저 `npm run build`를 실행한 뒤 `node dist/server.js`를 사용합니다. 방문자 저장 기능에는 Node 서버가 필요하며 정적 호스팅만으로 방문자 API는 실행되지 않습니다. 해시 경로를 사용하므로 기사 상세 새로고침을 위한 별도 서버 라우팅은 필요하지 않습니다.
 
 ## 화면 확인 순서
 
@@ -111,7 +111,7 @@ npm run build
 | src/service.ts | 샘플 조회와 추천 묶음 생성. 실제 API 교체 위치 |
 | src/app.ts | 화면 상태, 독자·카테고리 전환, 기사 상세, 안전한 본문 출력 |
 | src/style.css | 반응형 레이아웃, CSS 그래픽, 키보드 포커스 |
-| server.mjs | 외부 의존성 없는 로컬 서버 |
+| server.ts, server/*.ts | Node 서버와 API·방문자 저장 소스. 빌드 후 dist/server.js로 실행 |
 | tests/feed.test.js | 독자별 차이, 신규 독자 정렬, 필터, 오류·빈 결과·복구 검증 |
 | DESIGN_NOTES.md | 구현 내용, 선택 이유, 팀 피드백 질문과 제한 |
 

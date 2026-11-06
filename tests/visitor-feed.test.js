@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createVisitorFeed} from '../server/feed.mjs';
+import {createVisitorFeed} from '../dist/server/feed.js';
 test('방문자별 좋아요가 추천 순서와 근거를 바꾸며 미래 기사는 제외한다',()=>{
  const tech=createVisitorFeed({readerId:'tech',likedIds:['a1']});
  const sport=createVisitorFeed({readerId:'sport',likedIds:['a3']});

@@ -1,6 +1,6 @@
 # 프론트엔드 저장소 참조
 
-> Last Updated: 2026-11-03
+> Last Updated: 2026-11-06
 
 상태 표기는 `CLAUDE.md`를 따릅니다. 경로의 존재 여부는 작업 브랜치에서 확인합니다.
 
@@ -8,8 +8,8 @@
 
 ```text
 src/                 화면, 샘플 데이터, 피드·방문자·좋아요 클라이언트
-server/              피드·방문자·좋아요 HTTP 처리
-server.mjs           Node 서버 진입점
+server/              피드·방문자·좋아요 HTTP 처리(TypeScript)
+server.ts            Node 서버 진입점(TypeScript)
 tests/               피드·방문자·좋아요 테스트
 scripts/             검사, 빌드, Docker 검증
 docs/                화면 설계, 프론트·백엔드 계약, 행동 수집 설계
@@ -29,11 +29,11 @@ Windows Git에서 `core.symlinks=false`이면 `.agents`가 링크 대상 문자�
 
 | 경로 | 책임 |
 |---|---|
-| `src/data.js`, `src/service.js` | 가상 독자·기사와 샘플 추천 결과 |
-| `src/app.js`, `src/style.css` | 화면 상태, 기사 상세, 반응형 UI |
-| `src/visitor.js`, `server/visitors.mjs` | 비로그인 방문자 식별과 저장 |
-| `src/likes.js`, `server/http.mjs`, `server/visitors.mjs` | 좋아요 UI와 API·저장 |
-| `server/feed.mjs`, `server/http.mjs` | 샘플 피드와 HTTP 경계 |
+| `src/data.ts`, `src/service.ts` | 가상 독자·기사와 샘플 추천 결과 |
+| `src/app.ts`, `src/style.css` | 화면 상태, 기사 상세, 반응형 UI |
+| `src/visitor.ts`, `server/visitors.ts` | 비로그인 방문자 식별과 저장 |
+| `src/likes.ts`, `server/http.ts`, `server/visitors.ts` | 좋아요 UI와 API·저장 |
+| `server/feed.ts`, `server/http.ts` | 샘플 피드와 HTTP 경계 |
 | `tests/` | 독자별 차이, 신규 독자, 방문자, 좋아요 동작 검증 |
 | `docs/contracts/` | 다른 저장소와 합의할 인터페이스 |
 | `docs/behavior-collection/` | 행동 이벤트 수집 설계와 시안 |

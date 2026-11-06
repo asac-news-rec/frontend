@@ -5,8 +5,8 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {DatabaseSync} from 'node:sqlite';
-import {createNewsServer} from '../server/http.mjs';
-import {openVisitors, lifetimeSeconds} from '../server/visitors.mjs';
+import {createNewsServer} from '../dist/server/http.js';
+import {openVisitors, lifetimeSeconds} from '../dist/server/visitors.js';
 
 test('익명 방문자의 HTTP 쿠키·서버 저장·재방문·삭제·만료', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'news-visitors-'));
@@ -64,7 +64,7 @@ test('익명 방문자의 HTTP 쿠키·서버 저장·재방문·삭제·만료'
     assert.equal((await request('bootstrap', {cookie:cookieB, body:{reader_id:reader.reader_id}})).status, 400);
     assert.equal((await request('interests', {cookie:cookieA, body:{initial_interests:['문화']}})).status, 404);
     assert.equal((await request('reset', {cookie:cookieA, body:{}, originHeader:'https://attacker.example'})).status, 403);
-    for (const resource of ['/data/visitors.sqlite', '/server/http.mjs', '/tests/visitor.test.js', '/package.json']) assert.equal((await fetch(base + resource)).status, 404);
+    for (const resource of ['/data/visitors.sqlite', '/server/http.ts', '/dist/server/http.js', '/tests/visitor.test.js', '/package.json']) assert.equal((await fetch(base + resource)).status, 404);
     assert.equal((await fetch(base + '/')).status, 200);
     const reset = await request('reset', {cookie:cookieA, body:{}});
     assert.equal(reset.status, 200);
