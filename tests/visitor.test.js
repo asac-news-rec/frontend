@@ -5,8 +5,8 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {DatabaseSync} from 'node:sqlite';
-import {createNewsServer} from '../dist/server/http.js';
-import {openVisitors, lifetimeSeconds} from '../dist/server/visitors.js';
+import {createNewsServer} from '../.local/server/http.js';
+import {openVisitors, lifetimeSeconds} from '../.local/server/visitors.js';
 
 test('익명 방문자의 HTTP 쿠키·서버 저장·재방문·삭제·만료', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'news-visitors-'));

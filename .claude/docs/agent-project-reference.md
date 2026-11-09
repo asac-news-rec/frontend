@@ -13,8 +13,8 @@ server.ts            Node 서버 진입점(TypeScript)
 tests/               피드·방문자·좋아요 테스트
 scripts/             검사, 빌드, Docker 검증
 docs/                화면 설계, 프론트·백엔드 계약, 행동 수집 설계
-Dockerfile           프론트엔드 컨테이너
-compose.yaml         화면 서버와 visitor-data 볼륨
+Dockerfile           로컬 개발 컨테이너 및 정적 파일 추출
+compose.yaml         로컬 개발 서버 (기존 볼륨 미사용)
 README.md            실행 방법과 현재 한계
 CLAUDE.md            에이전트 진입점
 AGENTS.md            Windows 호환을 위한 동일 내용의 사본
@@ -23,7 +23,7 @@ AGENTS.md            Windows 호환을 위한 동일 내용의 사본
 .github/             이슈·PR 양식과 브랜치 이름 검사
 ```
 
-브라우저와 Node 서버의 소스는 TypeScript입니다. 빌드 후 브라우저는 `dist/src/*.js`를 받고 서버는 `dist/server.js`에서 실행됩니다. 빌드·검증 도구와 테스트는 JavaScript로 유지합니다.
+브라우저와 로컬 서버 소스는 TypeScript입니다. `npm run build`는 브라우저 의존성만 `dist/`에 출력합니다. `npm start`는 `.local/dev-server.js`에서 개발 프록시를 실행하며 SQLite를 초기화하지 않습니다. 기존 서버는 `.local/`에 컴파일되어 회귀 테스트에서만 사용합니다. 운영 Nginx 예시는 `deploy/nginx.frontend.conf`, 배포 계약은 `docs/contracts/frontend-deployment.md`입니다.
 
 Windows Git에서 `core.symlinks=false`이면 `.agents`가 링크 대상 문자열을 담은 일반 파일로 체크아웃될 수 있습니다. 이 경우 `.claude/docs/`를 직접 사용합니다. `AGENTS.md`와 `CLAUDE.md`는 내용이 같아야 합니다.
 

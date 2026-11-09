@@ -2,11 +2,8 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
-import {mkdtemp,rm} from 'node:fs/promises';
-import {tmpdir} from 'node:os';
-import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createNewsServer} from '../dist/server/http.js';
+import {createDevServer} from '../.local/server/dev-http.js';
 
 test('화면 서버가 백엔드 발급·피드·좋아요를 같은 출처에서 제공한다',async t=>{
  const calls=[];
@@ -19,19 +16,20 @@ test('화면 서버가 백엔드 발급·피드·좋아요를 같은 출처에�
   res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify(value));
  });
  upstream.listen(0,'127.0.0.1');await once(upstream,'listening');
- const directory=await mkdtemp(path.join(tmpdir(),'news-backend-live-'));
  const origin='http://127.0.0.1:4173';
  const root=fileURLToPath(new URL('../',import.meta.url));
- const {server,close}=createNewsServer({root,origin,database:path.join(directory,'visitors.sqlite'),backendBaseUrl:`http://127.0.0.1:${upstream.address().port}/`});
+ const server=createDevServer({root,origin,backendBaseUrl:`http://127.0.0.1:${upstream.address().port}/`});
  server.listen(0,'127.0.0.1');await once(server,'listening');
- t.after(async()=>{await new Promise(resolve=>server.close(resolve));close();await new Promise(resolve=>upstream.close(resolve));await rm(directory,{recursive:true,force:true});});
+ t.after(async()=>{await new Promise(resolve=>server.close(resolve));await new Promise(resolve=>upstream.close(resolve));});
  const base=`http://127.0.0.1:${server.address().port}`;
  const request=(route,method,body)=>fetch(base+route,{method,headers:{Origin:origin,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});
  assert.match(await (await fetch(base+'/')).text(),/src\/app.js/);
  const browserApp=await fetch(base+'/src/app.js');
  assert.equal(browserApp.status,200);
  assert.match(browserApp.headers.get('content-type'),/text\/javascript/);
- assert.equal((await fetch(base+'/src/app.ts')).status,404);
+ for(const route of ['/src/app.ts','/server.js','/dev-server.js','/package.json','/data/visitors.sqlite','/api/v1/visitors/me'])assert.equal((await fetch(base+route)).status,404,route);
+ assert.equal((await fetch(base+'/',{method:'HEAD'})).status,200);
+ assert.equal((await fetch(base+'/',{method:'POST'})).status,405);
  assert.equal((await request('/api/v1/backend/user/anonymous','POST')).status,200);
  const feed=await (await request('/api/v1/backend/news/feed','POST',{reader_id:'reader-1',offset:0})).json();
  assert.equal(feed.items[0].title,'백엔드 기사');

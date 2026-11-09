@@ -14,3 +14,5 @@ screenshots
 .browser-test
 *.png
 *.zip
+
+.local/
