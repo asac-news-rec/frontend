@@ -7,9 +7,9 @@
 1. https://github.com/apps/claude 에서 frontend 저장소에 Claude 앱을 설치하거나 기존 조직 설치의 대상 저장소에 frontend를 추가합니다.
 2. 사용할 Claude 계정과 사용량 부담 주체를 정합니다. 이 자동화는 해당 인증 계정의 사용량을 소비합니다.
 3. Claude Code의 공식 OAuth 설정을 사용할 경우 로컬 터미널에서 `claude setup-token`을 실행합니다. 토큰은 채팅, PR, 코드, 로그에 붙이지 않습니다.
-4. https://github.com/asac-news-rec/frontend/settings/secrets/actions 에서 `CLAUDE_CODE_OAUTH_TOKEN`이라는 Repository Secret을 등록합니다. 조직 Secret을 사용하는 경우 frontend에 사용 권한이 있어야 합니다.
+4. https://github.com/asac-news-rec/frontend/settings/secrets/actions 에서 `CLAUDE_SETUP_TOKEN`이라는 Repository Secret을 등록합니다. 조직 Secret을 사용하는 경우 frontend에 사용 권한이 있어야 합니다.
 5. 워크플로를 main에 반영한 뒤 같은 저장소 브랜치의 실제 코드 변경 PR을 열거나 Draft를 Ready for review로 전환합니다.
-6. Actions의 "Claude Code PR Review" 성공과 PR 인라인 질문 및 리뷰 요약을 확인합니다. 이 PR 준비 단계에서는 Secret 등록 여부 및 실제 AI 실행은 검증되지 않았습니다.
+6. Actions의 "Claude Code PR Review" 성공과 PR 인라인 질문 및 리뷰 요약을 확인합니다. 설정 화면에서 CLAUDE_SETUP_TOKEN 등록을 확인했습니다. 기존 Secret을 그대로 사용하며, 토큰 유효성과 실제 AI 실행은 실행 결과로 확인해야 합니다.
 
 공식 인증 안내: https://github.com/anthropics/claude-code-action/blob/main/docs/setup.md
 
