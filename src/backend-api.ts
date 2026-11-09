@@ -1,4 +1,5 @@
 import {backendImageUrl} from './image-url.js';
+import {rememberSyntheticImpressions} from './synthetic-events.js';
 interface BackendArticle {
   article_id: string;
   impression_id: string;
@@ -83,6 +84,7 @@ export async function getBackendPage(offset=0,{fetchImpl=fetch,getReaderId=getBa
    synthetic:item.is_synthetic,impressionId:item.impression_id,requestId:response.request_id,art:'library'};
   return {article,rank:item.position,reason:'',impressionId:item.impression_id,isLiked:item.is_liked};
  });
+ rememberSyntheticImpressions(response.items);
  return {generatedAt:response.served_at,strategy:'backend_latest',requestId:response.request_id,
   items,nextOffset:response.next_offset};
 }

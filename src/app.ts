@@ -1,6 +1,8 @@
 import type {Article, Feed, FeedItem} from './types.js';
 import {likeButton,seedBackendLikes} from './likes.js';
 import {getBackendPage,getBackendCategories,getBackendSubcategories} from './backend-api.js';
+import {initializeSyntheticEvents,recordSyntheticOpen} from './synthetic-events.js';
+let pendingOpen:string|null=null;
 const backendArticles=new Map<string, Article>();
 const main=document.querySelector('main')!;
 let feedScrollY=0;
@@ -17,6 +19,10 @@ window.addEventListener('scroll',()=>{
   if(!state.articleId&&!location.hash.startsWith('#article/'))feedScrollY=window.scrollY;
 },{passive:true});
 main.addEventListener('click',event=>{
+  pendingOpen=null;
+  if(event.isTrusted&&event.target instanceof Element&&!state.articleId&&event.button===0&&!event.ctrlKey&&!event.metaKey&&!event.shiftKey){
+    pendingOpen=event.target.closest<HTMLAnchorElement>('a[data-article]')?.dataset.article??null;
+  }
   if(!state.articleId&&event.target instanceof Element&&event.target.closest('a[data-article]')&&!event.ctrlKey&&!event.metaKey&&!event.shiftKey&&event.button===0)feedScrollY=window.scrollY;
 });
 const state={category:'전체',subcategory:'전체',status:'loading',feed:null as Feed | null,articleId:null as string | null,error:'',request:0};
@@ -117,7 +123,9 @@ window.addEventListener('hashchange',()=>{
   state.articleId=articleId;
   render();
   main.focus({preventScroll:true});
+  if(articleId&&pendingOpen===articleId&&backendArticles.has(articleId))void recordSyntheticOpen(articleId);
+  pendingOpen=null;
   requestAnimationFrame(()=>window.scrollTo({top:state.articleId?0:feedScrollY,left:0,behavior:'instant'}));
 });
 state.articleId=location.hash.startsWith('#article/')?decodeURIComponent(location.hash.slice(9)):null;
-initialize();
+void initializeSyntheticEvents().then(initialize);
