@@ -3,16 +3,16 @@ import type {IncomingMessage,ServerResponse} from 'node:http';
 export function createBackendProxy({baseUrl,origin,fetchImpl=fetch}:{baseUrl?:string;origin:string;fetchImpl?:typeof fetch}) {
  const target=baseUrl?new URL(baseUrl.endsWith('/')?baseUrl:`${baseUrl}/`):null;
  return async (req:IncomingMessage,res:ServerResponse,pathname:string):Promise<boolean>=>{
-  if(!['/user/anonymous','/category','/subcategory','/news/feed'].includes(pathname)&&!pathname.startsWith('/news/'))return false;
+  if(!['/api/user/anonymous','/api/category','/api/subcategory','/api/news/feed'].includes(pathname)&&!pathname.startsWith('/api/news/'))return false;
   const reply=(status:number,value:unknown)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'private, no-store'});res.end(JSON.stringify(value));return true;};
   if(!target)return reply(503,{error:'BACKEND_NOT_CONFIGURED'});
   let route:string,method:string|undefined;
-  if(pathname==='/user/anonymous'){route='/user/anonymous';method='POST';}
-  else if(pathname==='/category'){route='/category';method='POST';}
-  else if(pathname==='/subcategory'){route='/subcategory';method='POST';}
-  else if(pathname==='/news/feed'){route='/news/feed';method='POST';}
+  if(pathname==='/api/user/anonymous'){route='/user/anonymous';method='POST';}
+  else if(pathname==='/api/category'){route='/category';method='POST';}
+  else if(pathname==='/api/subcategory'){route='/subcategory';method='POST';}
+  else if(pathname==='/api/news/feed'){route='/news/feed';method='POST';}
   else {
-   const match=/^\/news\/([^/]+)\/like$/.exec(pathname);
+   const match=/^\/api\/news\/([^/]+)\/like$/.exec(pathname);
    if(!match)return reply(404,{error:'NOT_FOUND'});
    let articleId;try{articleId=decodeURIComponent(match[1]);}catch{return reply(400,{error:'INVALID_ARTICLE_ID'});}
    if(!articleId||articleId.includes('/')||articleId.length>128)return reply(400,{error:'INVALID_ARTICLE_ID'});
@@ -27,7 +27,7 @@ export function createBackendProxy({baseUrl,origin,fetchImpl=fetch}:{baseUrl?:st
   if(['/user/anonymous','/category'].includes(route)&&size)return reply(400,{error:'BODY_NOT_ALLOWED'});
   const body=Buffer.concat(chunks);
   try{
-   const upstream=await fetchImpl(new URL(route.slice(1),target),{method,headers:['/user/anonymous','/category'].includes(route)?{}:{'Content-Type':'application/json'},...(body.length?{body}:{}),signal:AbortSignal.timeout(8000)});
+   const upstream=await fetchImpl(new URL('api'+route,target),{method,headers:['/user/anonymous','/category'].includes(route)?{}:{'Content-Type':'application/json'},...(body.length?{body}:{}),signal:AbortSignal.timeout(8000)});
    if(!upstream.headers.get('content-type')?.includes('application/json'))return reply(502,{error:'INVALID_BACKEND_RESPONSE'});
    const payload=await upstream.json();
    return reply(upstream.status,payload);

@@ -1,35 +1,55 @@
-# 프론트엔드 정적 배포 계약
+# 기존 백엔드 구성에 맞춘 프론트 배포
 
-## 책임과 산출물
+## 확인 기준
 
-프론트는 `npm ci && npm run build`로 만든 `dist/` 내용만 제공합니다. 소스를 전달받는 방식이라면 배포 파이프라인에서 빌드합니다. 빌드에 Node.js가 필요하지만 운영 요청 처리에는 프론트 Node 서버가 필요 없습니다.
+백엔드 저장소 `asac-news-rec/backend` main의 `nginx/default.conf`, `compose.yaml`, `app/main.py`, `app/repository.py`, `web/app.js`를 기준으로 맞춥니다. 확인 커밋: `cf31205`.
 
-백엔드/인프라 담당자는 Nginx 정적 파일 루트, API upstream, HTTPS, 도메인을 구성합니다. 로컬과 운영은 같은 소스를 사용합니다.
+기존 Nginx는 `/api/`를 `api:8000/`으로 전달하고, `/images/`는 `/srv/images/`, 화면은 `/usr/share/nginx/html`에서 제공합니다. 백엔드 Compose가 `./web`을 이 정적 파일 루트에 연결합니다. 백엔드 소스와 Nginx 설정은 변경하지 않습니다.
 
-## API 경로
+## 배포 파일
 
-브라우저·로컬 개발 서버·운영 Nginx 모두 백엔드와 동일한 경로를 사용합니다. 접두사를 추가하거나 제거하지 않으며 메서드, JSON 본문, 상태 코드와 응답을 유지합니다.
+1. 프론트에서 `npm ci`, `npm run check`, `npm test`, `npm run build`를 실행합니다.
+2. 배포 담당자가 기존 백엔드 `web/` 화면을 백업합니다.
+3. `dist/` 안의 `index.html`과 `src/` 디렉토리를 백엔드 `web/` 안에 배치합니다. 결과는 `web/index.html`, `web/src/app.js`, `web/src/style.css`입니다. `web/dist/`로 복사하지 않습니다.
+4. 백엔드의 기존 실행·배포 절차를 따릅니다. 로컬 Compose에서는 http://127.0.0.1:8080/ 에서 새 화면을 확인합니다.
 
-| 메서드 | 브라우저 요청과 백엔드 경로 |
-|---|---|
-| POST | `/user/anonymous` |
-| POST | `/category` |
-| POST | `/subcategory` |
-| POST | `/news/feed` |
-| PUT / DELETE | `/news/{article_id}/like` |
+별도의 프론트 Nginx 설정이나 Node 실행 서버는 필요 없습니다. `.local/`, 서버 코드, node_modules, 환경 파일, SQLite를 `web/`에 복사하지 않습니다. 기존 화면을 되돌릴 때는 백업한 `web/` 내용을 복구합니다. 프론트 변경만으로 백엔드 DB나 이미지 폴더를 덮어쓰지 않습니다.
 
-[Nginx 예시](../../deploy/nginx.frontend.conf)는 기존 Nginx에 반영할 참고용 서버 블록입니다. 서버 주소 `backend:8000`, 도메인, 정적 루트를 실제 환경에 맞춰 변경하고 `nginx -t`로 검사합니다. `proxy_pass http://backend:8000;`에는 URI를 붙이지 않아 원래 요청 경로를 유지합니다. API 위치 블록에서 별도 rewrite를 추가하지 않습니다. 같은 Nginx가 이미 이 API 경로를 제공한다면 기존 라우팅을 유지하고 정적 파일 제공 부분만 추가하면 됩니다.
+## API 경로와 응답
 
-브라우저는 화면과 같은 출처로 API를 호출하므로 이 경로에서는 별도 CORS 설정이 필요 없습니다. 로컬 전용 Node 프록시의 Origin 검사와 요청 허용 목록이 Nginx에 자동 이식되는 것은 아닙니다. 운영에서 필요한 인증·요청 검증·접근 제어는 백엔드와 게이트웨이가 책임집니다. CORS는 인증을 대신하지 않습니다.
+| 브라우저·로컬 프록시·Nginx 요청 | 메서드 | FastAPI 내부 경로 |
+|---|---|---|
+| `/api/user/anonymous` | POST (본문 없음) | `/user/anonymous` |
+| `/api/category` | POST (본문 없음) | `/category` |
+| `/api/subcategory` | POST `{category}` | `/subcategory` |
+| `/api/news/feed` | POST `{reader_id, offset, category?, subcategory?}` | `/news/feed` |
+| `/api/news/{article_id}/like` | PUT / DELETE `{reader_id}` | `/news/{article_id}/like` |
 
-기존 서버의 `/api/v1/visitors/*`, 샘플 `/api/v1/feed`, 로컬 `/api/v1/likes`는 운영에 노출하지 않습니다. 현재 화면은 이 API를 사용하지 않습니다.
+`/api/`는 백엔드가 이미 제공하는 외부 경로입니다. 프론트 전용 접두사나 새 라우팅은 추가하지 않습니다. 로컬 개발 서버도 백엔드 Nginx의 `/api/*` 경로로 전달합니다.
 
-## 배포 검증
+피드 응답의 `request_id`, `served_at`, `items`, `next_offset`을 사용하며 최상위 `reader_id`는 요구하지 않습니다. 카테고리는 `category_list`, 소분류는 `sub_category_list`입니다. 좋아요 응답은 `article_id`, `is_liked`, `changed`입니다. 백엔드의 페이지당 최대 20건 및 `next_offset: null` 종료 처리를 유지합니다. 브라우저 독자 ID 저장 키는 백엔드 참고 화면과 같은 `sai-news.backend-reader-id`를 사용합니다.
 
-1. `dist/`에 `index.html`과 `src/`만 있는지 확인합니다. 서버 코드·SQLite·환경 파일을 복사하지 않습니다.
-2. Nginx 루트를 `dist/` 내용의 배치 위치에 맞추고 `nginx -t`를 실행합니다.
-3. 화면 및 `/src/app.js`가 정상 응답하는지 확인합니다. `/server.js`, `/data/visitors.sqlite`는 404여야 합니다.
-4. API를 통해 익명 ID 발급, 전체 피드, 카테고리·소분류, 다음 페이지, 좋아요 PUT/DELETE를 확인합니다.
-5. 실제 배포 도메인에서 HTTPS와 기사 이미지 URL을 확인합니다. `/src/` 파일은 같은 이름으로 재빌드되므로 예시는 `no-cache`를 사용합니다.
+## 이미지와 로컬 실행
 
-실제 GCP 자원 생성이나 운영 Nginx 변경은 이 프론트 변경에 포함하지 않습니다.
+백엔드 참고 화면처럼 기존 `http://localhost:8001/...` 또는 `http://127.0.0.1:8001/...` 이미지 주소만 `/images/...`로 연결합니다. 외부 HTTP(S) 이미지는 유지하고 다른 프로토콜은 표시하지 않습니다. DB 값은 수정하지 않습니다.
+
+기본 로컬 개발 서버는 `NEWS_BACKEND_URL=http://127.0.0.1:8080/`를 사용합니다. Docker 프론트에서는 `http://host.docker.internal:8080/`입니다. 둘 다 백엔드 Nginx의 루트 주소이고 `/api/`를 붙이지 않습니다. 로컬에서도 `/images/*`를 같은 Nginx로 전달하므로 별도의 8001 이미지 서버는 필요 없습니다.
+
+## 검증과 운영
+
+- 기존 Nginx와 API를 실행하고 `/api/health`, 화면, 카테고리·소분류, 다음 페이지, 좋아요 설정·해제를 확인합니다.
+- `/images/`와 기존 로컬 이미지 URL이 변환된 주소에서 이미지가 보이는지 확인합니다.
+- `nginx -t` 및 실제 GCP 검증은 배포 환경에서 수행합니다. 도메인·HTTPS·접근 제어는 백엔드/인프라 담당자의 기존 정책을 따릅니다.
+- 같은 출처로 API를 호출합니다. 로컬 프록시의 Origin 검사가 운영 Nginx에 자동 적용되지는 않습니다.
+- 현재 백엔드 Compose의 8080 포트는 `127.0.0.1`에만 바인딩되어 있습니다. 이 로컬 설정 자체가 GCP 외부 공개 구성을 의미하지는 않습니다.
+- 기존 Nginx 캐시 정책을 변경하지 않았습니다. 교체 후 이전 화면이 보이면 브라우저 캐시를 확인합니다.
+
+이 변경은 프론트 소스와 안내만 수정하며 백엔드 `web/` 파일 교체·실제 GCP 배포를 수행하지 않습니다.
+
+## 2026-11-09 검증 기록
+
+- Node 검사·빌드·20개 테스트 통과. Docker 이미지 내부에서도 동일 검사·테스트 통과.
+- 백엔드 `nginx/default.conf` 원본을 읽기 전용 마운트해 `nginx -t` 통과.
+- 위 Nginx에 프론트 `dist/`와 시험용 API·이미지를 연결했습니다. 빌드된 프론트 API 클라이언트로 ID 발급, 카테고리·소분류, 필터 피드, 다음 페이지, 좋아요 설정·해제, 이미지 조회를 검증했습니다.
+- 로컬 개발 컨테이너를 거치는 동일 흐름 및 Docker 정적 파일 추출도 통과했습니다.
+- 실제 백엔드 API·PostgreSQL·GCP 환경은 검증하지 않았습니다. 검증용 컨테이너는 종료·정리했고 기존 데이터는 변경하지 않았습니다.

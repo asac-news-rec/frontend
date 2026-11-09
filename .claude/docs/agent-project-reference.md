@@ -23,7 +23,7 @@ AGENTS.md            Windows 호환을 위한 동일 내용의 사본
 .github/             이슈·PR 양식과 브랜치 이름 검사
 ```
 
-브라우저와 로컬 서버 소스는 TypeScript입니다. `npm run build`는 브라우저 의존성만 `dist/`에 출력합니다. `npm start`는 `.local/dev-server.js`에서 개발 프록시를 실행하며 SQLite를 초기화하지 않습니다. 기존 서버는 `.local/`에 컴파일되어 회귀 테스트에서만 사용합니다. 운영 Nginx 예시는 `deploy/nginx.frontend.conf`, 배포 계약은 `docs/contracts/frontend-deployment.md`입니다.
+브라우저와 로컬 서버 소스는 TypeScript입니다. `npm run build`는 브라우저 의존성만 `dist/`에 출력합니다. `npm start`는 `.local/dev-server.js`에서 개발 프록시를 실행하며 SQLite를 초기화하지 않습니다. 기존 서버는 `.local/`에 컴파일되어 회귀 테스트에서만 사용합니다. 기존 백엔드 Nginx를 그대로 사용하며, 배포 계약은 `docs/contracts/frontend-deployment.md`입니다.
 
 Windows Git에서 `core.symlinks=false`이면 `.agents`가 링크 대상 문자열을 담은 일반 파일로 체크아웃될 수 있습니다. 이 경우 `.claude/docs/`를 직접 사용합니다. `AGENTS.md`와 `CLAUDE.md`는 내용이 같아야 합니다.
 

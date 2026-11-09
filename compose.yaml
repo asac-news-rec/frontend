@@ -7,7 +7,7 @@ services:
       - "127.0.0.1:${NEWS_PORT:-4181}:4173"
     environment:
       PUBLIC_ORIGIN: "http://127.0.0.1:${NEWS_PORT:-4181}"
-      NEWS_BACKEND_URL: ${NEWS_BACKEND_URL:-http://host.docker.internal:8000/}
+      NEWS_BACKEND_URL: ${NEWS_BACKEND_URL:-http://host.docker.internal:8080/}
     init: true
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4173/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]

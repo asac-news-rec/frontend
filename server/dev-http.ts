@@ -10,6 +10,16 @@ export function createDevServer({root,origin,backendBaseUrl}:{root:string;origin
     try {
       const pathname=new URL(req.url??'/',origin).pathname;
       if(await proxy(req,res,pathname))return;
+      if(pathname.startsWith('/images/')) {
+        if(req.method!=='GET'&&req.method!=='HEAD'){res.writeHead(405);res.end();return;}
+        if(!backendBaseUrl){res.writeHead(503);res.end();return;}
+        try {
+          const upstream=await fetch(new URL(pathname+new URL(req.url??'/',origin).search,backendBaseUrl),{method:req.method,signal:AbortSignal.timeout(8000)});
+          res.writeHead(upstream.status,{'Content-Type':upstream.headers.get('content-type')??'application/octet-stream','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
+          res.end(req.method==='HEAD'?undefined:Buffer.from(await upstream.arrayBuffer()));
+        } catch {if(!res.headersSent)res.writeHead(503);res.end();}
+        return;
+      }
       if(req.method!=='GET'&&req.method!=='HEAD'){res.writeHead(405);res.end();return;}
       if(!['/','/index.html'].includes(pathname)&&!/^\/src\/[a-zA-Z0-9_-]+\.(js|css)$/.test(pathname)){res.writeHead(404);res.end();return;}
       const filename=pathname==='/'?'index.html':pathname.slice(1);
