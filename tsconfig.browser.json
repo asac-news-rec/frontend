@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noEmitOnError": true,
+    "rootDir": ".",
+    "outDir": "dist",
+    "types": [],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"]
+  },
+  "files": ["src/app.ts"]
+}

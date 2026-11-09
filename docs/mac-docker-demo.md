@@ -1,3 +1,5 @@
+> 과거 Node·SQLite 시연 절차입니다. 현재 실행·배포는 [README](../README.md)를 따르세요.
+
 # 맥북에서 프론트엔드·백엔드 Docker 시연
 
 이 문서는 **새 Mac**에서 AI 실행 담당자가 따라 할 절차입니다. Docker Desktop과 Git이 설치되어 있고 GitHub의 `asac-news-rec` 저장소에 접근 권한이 있어야 합니다. 모든 명령은 macOS Terminal의 `zsh` 기준입니다. Mac에서의 실행은 아직 검증하지 않았으므로, 아래 확인 명령의 실제 결과를 보고 시연 준비를 완료하세요.

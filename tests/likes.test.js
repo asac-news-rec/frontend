@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
-import {createNewsServer} from '../dist/server/http.js';
+import {createNewsServer} from '../.local/server/http.js';
 test('좋아요는 방문자별로 저장·재시작 유지·중복 방지·취소·삭제된다',async()=>{
  const dir=await mkdtemp(path.join(tmpdir(),'news-likes-'));
  const origin='http://127.0.0.1:4173';let app;let base;

@@ -11,6 +11,7 @@ export interface Article {
   title: string;
   summary: string;
   category: string;
+  subcategory?: string | null;
   publisher: string;
   publishedAt: string;
   body: string;

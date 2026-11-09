@@ -9,6 +9,7 @@
 | [meetings/2026-10-31](meetings/2026-10-31/README.md) | 기존 멘토링 계획·백로그·근거 자료와 백엔드 논의 원본 |
 | [behavior-collection](behavior-collection/behavior-collection-overview.md) | 행동 수집 설명·프론트엔드 명세·모의 화면 |
 | [implementation](implementation/anonymous-visitor-implementation.md) | 구현한 기능의 기술 기록 |
+| [현재 배포 계약](contracts/frontend-deployment.md) | 같은 소스의 로컬 개발·GCP Nginx 정적 배포 |
 | [contracts](contracts/frontend_backend_contract_v0.1.md) | 과거 API 계약 초안. 적용 전 최신 명세와 비교 |
 | [design/2026-10-31](design/2026-10-31/frontend-blueprint-readable-2026-10-31.html) | 화면 청사진·읽기용 자료·피드백·검증 기록 |
 | [research](research/frontend-reference.md) | 유사 프로젝트·프론트엔드 참고·클라우드 조사 |

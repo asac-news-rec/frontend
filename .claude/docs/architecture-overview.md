@@ -18,8 +18,8 @@
 
 - `src/data.ts`와 `src/service.ts`는 가상 독자·기사와 샘플 피드 순서를 제공합니다. 추천 근거는 시안이며 학습된 모델의 출력이 아닙니다.
 - `src/app.ts`는 피드, 카테고리, 기사 상세와 오류·빈 결과 화면을 표시합니다.
-- `server.ts`와 `server/*.ts`는 샘플 피드, 비로그인 방문자 식별·저장, 좋아요 API를 제공합니다. `npm run build`가 브라우저와 서버 JavaScript를 `dist/`에 생성합니다.
-- 방문자 정보는 로컬 SQLite 또는 Docker `visitor-data` 볼륨에 저장됩니다. Docker Compose는 화면 서버를 실행하며 팀 전체 인프라용 compose와 별개입니다.
+- `server.ts`와 `server/*.ts`는 샘플 피드, 비로그인 방문자 식별·저장, 좋아요 API를 제공합니다. 기존 서버는 회귀 테스트용 `.local/`에만 컴파일합니다. `npm run build`는 화면 의존성만 `dist/`에 생성합니다.
+- 기본 로컬 실행은 `dev-server.ts`의 정적 파일 서버와 API 프록시이며 SQLite를 사용하지 않습니다. 운영은 `dist/` 정적 파일과 백엔드 담당자의 Nginx를 사용합니다. 기존 방문자 DB·볼륨은 연결하거나 삭제하지 않습니다.
 - 테스트는 독자별 샘플 결과 차이, 신규 독자 처리, 방문자와 좋아요 동작을 확인합니다.
 
 ## 다음 연결 [계획]
