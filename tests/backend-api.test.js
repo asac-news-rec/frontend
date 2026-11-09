@@ -29,9 +29,9 @@ test('백엔드 ID를 한 번 발급받고 다음 목록에 숫자 offset을 보
  const second=await getBackendPage(first.nextOffset,{fetchImpl,getReaderId});
  assert.equal(await getReaderId(),readerId);
  assert.deepEqual(calls.map(call=>[call.url,call.body]),[
-  ['/api/v1/backend/user/anonymous',undefined],
-  ['/api/v1/backend/news/feed',{reader_id:readerId,offset:0}],
-  ['/api/v1/backend/news/feed',{reader_id:readerId,offset:2}]]);
+  ['/user/anonymous',undefined],
+  ['/news/feed',{reader_id:readerId,offset:0}],
+  ['/news/feed',{reader_id:readerId,offset:2}]]);
  assert.deepEqual([...first.items,...second.items].map(item=>item.rank),[1,2,3]);
  assert.deepEqual(first.items.map(item=>item.isLiked),[true,false]);
  assert.equal(second.nextOffset,null);
@@ -51,10 +51,10 @@ test('카테고리·소분류와 동일 필터의 다음 페이지를 요청한�
  const first=await getBackendPage(0,{fetchImpl,getReaderId:async()=>readerId,filters});
  await getBackendPage(first.nextOffset,{fetchImpl,getReaderId:async()=>readerId,filters});
  assert.deepEqual(calls.map(({url,body})=>[url,body]),[
-  ['/api/v1/backend/category',undefined],
-  ['/api/v1/backend/subcategory',{category:'정치'}],
-  ['/api/v1/backend/news/feed',{reader_id:readerId,offset:0,...filters}],
-  ['/api/v1/backend/news/feed',{reader_id:readerId,offset:20,...filters}]]);
+  ['/category',undefined],
+  ['/subcategory',{category:'정치'}],
+  ['/news/feed',{reader_id:readerId,offset:0,...filters}],
+  ['/news/feed',{reader_id:readerId,offset:20,...filters}]]);
 });
 
 test('좋아요는 PUT·DELETE 본문에 reader_id만 보낸다',async()=>{
@@ -65,8 +65,8 @@ test('좋아요는 PUT·DELETE 본문에 reader_id만 보낸다',async()=>{
  assert.deepEqual(await change('a1',true),{article_id:'a1',is_liked:true,changed:true});
  assert.deepEqual(await change('a1',false),{article_id:'a1',is_liked:false,changed:true});
  assert.deepEqual(calls,[
-  {url:'/api/v1/backend/news/a1/like',method:'PUT',body:{reader_id:readerId}},
-  {url:'/api/v1/backend/news/a1/like',method:'DELETE',body:{reader_id:readerId}}]);
+  {url:'/news/a1/like',method:'PUT',body:{reader_id:readerId}},
+  {url:'/news/a1/like',method:'DELETE',body:{reader_id:readerId}}]);
 });
 
 test('잘못된 기사 응답과 좋아요 응답을 적용하지 않는다',async()=>{

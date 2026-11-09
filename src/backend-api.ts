@@ -38,7 +38,7 @@ const legacyStorageKey='sai-news.backend-user-id';
 const uuid7=/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 async function request(route: string,body: object | undefined,method='POST',fetchImpl=fetch){
- const response=await fetchImpl('/api/v1/backend'+route,{method,credentials:'same-origin',cache:'no-store',
+ const response=await fetchImpl(route,{method,credentials:'same-origin',cache:'no-store',
   ...(body===undefined?{}:{headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})});
  if(!response.ok)throw new Error(`BACKEND_HTTP_${response.status}`);
  return response.json();

@@ -16,7 +16,7 @@ npm start
 
 접속: http://127.0.0.1:4173/ (`npm run dev`도 동일). 소스를 수정하면 서버를 종료하고 다시 시작합니다. 현재 자동 재빌드 기능은 없습니다.
 
-브라우저는 `/api/v1/backend/*`로 요청하고 로컬 개발 서버가 백엔드로 전달합니다. 백엔드 Nginx에 API가 `/api/` 아래 있으면 `NEWS_BACKEND_URL=http://127.0.0.1:8080/api/`로 설정합니다. `PUBLIC_ORIGIN`을 지정한다면 실제 브라우저 접속 주소와 일치시켜야 합니다. 기본 실행에서는 `localhost` 대신 `127.0.0.1`을 사용합니다.
+브라우저는 백엔드와 동일한 `/news/feed`, `/category`, `/subcategory`, `/user/anonymous`, `/news/{article_id}/like` 경로로 요청하고 로컬 개발 서버는 같은 경로로 전달합니다. 백엔드 Nginx에 API가 `/api/` 아래 있으면 `NEWS_BACKEND_URL=http://127.0.0.1:8080/api/`로 설정합니다. `PUBLIC_ORIGIN`을 지정한다면 실제 브라우저 접속 주소와 일치시켜야 합니다. 기본 실행에서는 `localhost` 대신 `127.0.0.1`을 사용합니다.
 
 백엔드가 꺼져 있으면 연결 오류를 표시합니다. 샘플 데이터로 자동 대체하지 않습니다. 로컬 서버는 화면 파일과 백엔드 프록시만 제공하며 SQLite·방문자 쿠키 API를 실행하지 않습니다. `.local/`은 개발·기존 회귀 테스트용 컴파일 결과이며 배포하지 않습니다.
 
@@ -34,9 +34,9 @@ npm run build
 백엔드 담당자가 구성하는 Nginx에서 다음 두 가지를 연결합니다.
 
 1. `dist/` 내용을 Nginx 정적 파일 루트에 배치합니다.
-2. `/api/v1/backend/` 접두사를 제거하고 API 요청을 백엔드로 전달합니다.
+2. `/news/feed`, `/category`, `/subcategory`, `/user/anonymous`, `/news/{article_id}/like` 요청을 경로 변경 없이 백엔드로 전달합니다.
 
-예: `/api/v1/backend/news/feed` → FastAPI `/news/feed`. 기존 백엔드 Nginx를 경유한다면 `/api/news/feed`로 연결할 수 있습니다. [배포 계약과 Nginx 예시](docs/contracts/frontend-deployment.md)를 참고하세요.
+예: 브라우저 `/news/feed` → 백엔드 `/news/feed`. [배포 계약과 Nginx 예시](docs/contracts/frontend-deployment.md)를 참고하세요.
 
 소스만 GCP에 전달하는 경우 빌드 환경이 위 명령을 실행해야 합니다. Nginx는 TypeScript를 빌드하지 않습니다. 운영에서 `npm start`를 실행할 필요는 없으며 프론트 Node 실행 서버·방문자 DB 볼륨도 필요 없습니다. 운영 HTTPS·도메인·백엔드 주소는 백엔드/인프라 담당자가 설정합니다.
 

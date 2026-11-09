@@ -20,25 +20,25 @@ test('같은 출처 프록시는 태원님 API의 경로·method·본문을 유�
  t.after(async()=>{await new Promise(resolve=>web.close(resolve));await new Promise(resolve=>upstream.close(resolve));});
  const base=`http://127.0.0.1:${web.address().port}`;
  const post=(route,method,body,requestOrigin=origin)=>fetch(base+route,{method,headers:{Origin:requestOrigin,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});
- assert.equal((await post('/api/v1/backend/user/anonymous','POST')).status,200);
- assert.equal((await post('/api/v1/backend/category','POST')).status,200);
- assert.equal((await post('/api/v1/backend/subcategory','POST',{category:'정치'})).status,200);
- assert.equal((await post('/api/v1/backend/news/feed','POST',{reader_id:'reader',offset:20})).status,200);
- assert.equal((await post('/api/v1/backend/news/a1/like','PUT',{reader_id:'reader'})).status,200);
- assert.equal((await post('/api/v1/backend/news/a1/like','DELETE',{reader_id:'reader'})).status,200);
+ assert.equal((await post('/user/anonymous','POST')).status,200);
+ assert.equal((await post('/category','POST')).status,200);
+ assert.equal((await post('/subcategory','POST',{category:'정치'})).status,200);
+ assert.equal((await post('/news/feed','POST',{reader_id:'reader',offset:20})).status,200);
+ assert.equal((await post('/news/a1/like','PUT',{reader_id:'reader'})).status,200);
+ assert.equal((await post('/news/a1/like','DELETE',{reader_id:'reader'})).status,200);
  assert.deepEqual(received.map(({method,url})=>[method,url]),[
   ['POST','/user/anonymous'],['POST','/category'],['POST','/subcategory'],['POST','/news/feed'],['PUT','/news/a1/like'],['DELETE','/news/a1/like']]);
  assert.equal(received[1].body,'');
  assert.deepEqual(JSON.parse(received[2].body),{category:'정치'});
  assert.equal(JSON.parse(received[3].body).offset,20);
  assert.deepEqual(JSON.parse(received[4].body),{reader_id:'reader'});
- assert.equal((await post('/api/v1/backend/news/feed','POST',{reader_id:'reader',offset:0},'http://evil.test')).status,403);
+ assert.equal((await post('/news/feed','POST',{reader_id:'reader',offset:0},'http://evil.test')).status,403);
  assert.equal(received.length,6);
  const prefixed=createBackendProxy({baseUrl:`http://127.0.0.1:${upstream.address().port}/api`,origin});
  const nginxWeb=createServer(async(req,res)=>{if(!await prefixed(req,res,new URL(req.url,origin).pathname)){res.writeHead(404);res.end();}});
  nginxWeb.listen(0,'127.0.0.1');await once(nginxWeb,'listening');
  t.after(()=>new Promise(resolve=>nginxWeb.close(resolve)));
- const nginxResponse=await fetch(`http://127.0.0.1:${nginxWeb.address().port}/api/v1/backend/news/feed`,{
+ const nginxResponse=await fetch(`http://127.0.0.1:${nginxWeb.address().port}/news/feed`,{
   method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({reader_id:'reader',offset:0})});
  assert.equal(nginxResponse.status,200);
  assert.equal(received.at(-1).url,'/api/news/feed');

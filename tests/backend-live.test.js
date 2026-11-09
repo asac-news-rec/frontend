@@ -30,10 +30,10 @@ test('화면 서버가 백엔드 발급·피드·좋아요를 같은 출처에�
  for(const route of ['/src/app.ts','/server.js','/dev-server.js','/package.json','/data/visitors.sqlite','/api/v1/visitors/me'])assert.equal((await fetch(base+route)).status,404,route);
  assert.equal((await fetch(base+'/',{method:'HEAD'})).status,200);
  assert.equal((await fetch(base+'/',{method:'POST'})).status,405);
- assert.equal((await request('/api/v1/backend/user/anonymous','POST')).status,200);
- const feed=await (await request('/api/v1/backend/news/feed','POST',{reader_id:'reader-1',offset:0})).json();
+ assert.equal((await request('/user/anonymous','POST')).status,200);
+ const feed=await (await request('/news/feed','POST',{reader_id:'reader-1',offset:0})).json();
  assert.equal(feed.items[0].title,'백엔드 기사');
- assert.equal((await request('/api/v1/backend/news/article-1/like','PUT',{reader_id:'reader-1'})).status,200);
+ assert.equal((await request('/news/article-1/like','PUT',{reader_id:'reader-1'})).status,200);
  assert.deepEqual(calls.map(call=>call.path),['/user/anonymous','/news/feed','/news/article-1/like']);
  assert.deepEqual(calls[1].body,{reader_id:'reader-1',offset:0});
 });
