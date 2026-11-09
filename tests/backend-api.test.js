@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {getBackendReaderId,getBackendPage,getBackendCategories,getBackendSubcategories,changeBackendLike} from '../dist/src/backend-api.js';
+import {getBackendReaderId,getBackendPage,getBackendCategories,getBackendSubcategories,changeBackendLike} from '../.local/src/backend-api.js';
 
 const readerId='019a4c00-0000-7000-8000-000000000001';
 const article=(position,id)=>({article_id:id,impression_id:`imp-${position}`,position,title:`기사 ${position}`,
@@ -19,7 +19,7 @@ test('백엔드 ID를 한 번 발급받고 다음 목록에 숫자 offset을 보
  const storage={getItem:key=>values.get(key)??null,setItem:(key,value)=>values.set(key,value)};
  const fetchImpl=async(url,options)=>{
   calls.push({url,method:options.method,body:options.body&&JSON.parse(options.body)});
-  if(url.endsWith('/user/anonymous'))return {ok:true,json:async()=>({reader_id:readerId})};
+  if(url.endsWith('/api/user/anonymous'))return {ok:true,json:async()=>({reader_id:readerId})};
   const offset=JSON.parse(options.body).offset;
   return {ok:true,json:async()=>({request_id:`req-${offset}`,served_at:'2026-11-04T01:30:00Z',
    items:offset===0?[article(1,'a1'),article(2,'a2')]:[article(3,'a3')],next_offset:offset===0?2:null})};
@@ -29,9 +29,9 @@ test('백엔드 ID를 한 번 발급받고 다음 목록에 숫자 offset을 보
  const second=await getBackendPage(first.nextOffset,{fetchImpl,getReaderId});
  assert.equal(await getReaderId(),readerId);
  assert.deepEqual(calls.map(call=>[call.url,call.body]),[
-  ['/api/v1/backend/user/anonymous',undefined],
-  ['/api/v1/backend/news/feed',{reader_id:readerId,offset:0}],
-  ['/api/v1/backend/news/feed',{reader_id:readerId,offset:2}]]);
+  ['/api/user/anonymous',undefined],
+  ['/api/news/feed',{reader_id:readerId,offset:0}],
+  ['/api/news/feed',{reader_id:readerId,offset:2}]]);
  assert.deepEqual([...first.items,...second.items].map(item=>item.rank),[1,2,3]);
  assert.deepEqual(first.items.map(item=>item.isLiked),[true,false]);
  assert.equal(second.nextOffset,null);
@@ -41,7 +41,7 @@ test('카테고리·소분류와 동일 필터의 다음 페이지를 요청한�
  const calls=[];
  const fetchImpl=async(url,options)=>{
   calls.push({url,body:options.body&&JSON.parse(options.body)});
-  const payload=url.endsWith('/category')?{category_list:['정치']}:url.endsWith('/subcategory')?{sub_category_list:['국회']}:
+  const payload=url.endsWith('/api/category')?{category_list:['정치']}:url.endsWith('/api/subcategory')?{sub_category_list:['국회']}:
    {request_id:'req',served_at:'2026-11-04T01:30:00Z',items:[article(1,'a1')],next_offset:20};
   return {ok:true,json:async()=>payload};
  };
@@ -51,10 +51,10 @@ test('카테고리·소분류와 동일 필터의 다음 페이지를 요청한�
  const first=await getBackendPage(0,{fetchImpl,getReaderId:async()=>readerId,filters});
  await getBackendPage(first.nextOffset,{fetchImpl,getReaderId:async()=>readerId,filters});
  assert.deepEqual(calls.map(({url,body})=>[url,body]),[
-  ['/api/v1/backend/category',undefined],
-  ['/api/v1/backend/subcategory',{category:'정치'}],
-  ['/api/v1/backend/news/feed',{reader_id:readerId,offset:0,...filters}],
-  ['/api/v1/backend/news/feed',{reader_id:readerId,offset:20,...filters}]]);
+  ['/api/category',undefined],
+  ['/api/subcategory',{category:'정치'}],
+  ['/api/news/feed',{reader_id:readerId,offset:0,...filters}],
+  ['/api/news/feed',{reader_id:readerId,offset:20,...filters}]]);
 });
 
 test('좋아요는 PUT·DELETE 본문에 reader_id만 보낸다',async()=>{
@@ -65,8 +65,8 @@ test('좋아요는 PUT·DELETE 본문에 reader_id만 보낸다',async()=>{
  assert.deepEqual(await change('a1',true),{article_id:'a1',is_liked:true,changed:true});
  assert.deepEqual(await change('a1',false),{article_id:'a1',is_liked:false,changed:true});
  assert.deepEqual(calls,[
-  {url:'/api/v1/backend/news/a1/like',method:'PUT',body:{reader_id:readerId}},
-  {url:'/api/v1/backend/news/a1/like',method:'DELETE',body:{reader_id:readerId}}]);
+  {url:'/api/news/a1/like',method:'PUT',body:{reader_id:readerId}},
+  {url:'/api/news/a1/like',method:'DELETE',body:{reader_id:readerId}}]);
 });
 
 test('잘못된 기사 응답과 좋아요 응답을 적용하지 않는다',async()=>{

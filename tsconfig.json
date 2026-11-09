@@ -5,8 +5,15 @@
     "strict": true,
     "noEmitOnError": true,
     "rootDir": ".",
-    "outDir": "dist",
-    "types": ["node"]
+    "outDir": ".local",
+    "types": [
+      "node"
+    ]
   },
-  "include": ["src/**/*.ts", "server.ts", "server/**/*.ts"]
+  "include": [
+    "src/**/*.ts",
+    "server.ts",
+    "server/**/*.ts",
+    "dev-server.ts"
+  ]
 }

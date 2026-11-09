@@ -1,21 +1,21 @@
 services:
   web:
-    build: .
+    build:
+      context: .
+      target: local
     ports:
       - "127.0.0.1:${NEWS_PORT:-4181}:4173"
     environment:
       PUBLIC_ORIGIN: "http://127.0.0.1:${NEWS_PORT:-4181}"
-      NEWS_BACKEND_URL: ${NEWS_BACKEND_URL:-}
-    volumes:
-      - visitor-data:/app/data
-    restart: unless-stopped
+      NEWS_BACKEND_URL: ${NEWS_BACKEND_URL:-http://host.docker.internal:8080/}
     init: true
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4173/api/v1/visitors/me').then(r=>process.exit([200,401].includes(r.status)?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4173/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 5s
       start_period: 10s
       retries: 3
 
+# Retain the old volume declaration; existing data is neither mounted nor deleted.
 volumes:
   visitor-data:

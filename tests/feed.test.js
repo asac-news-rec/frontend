@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createSampleFeed,getFeed} from '../dist/src/service.js';
+import {createSampleFeed,getFeed} from '../.local/src/service.js';
 test('독자별 첫 기사와 추천 근거가 다르다',()=>{
   const tech=createSampleFeed('reader-tech'),sport=createSampleFeed('reader-sport');
   assert.notEqual(tech.items[0].article.id,sport.items[0].article.id);
@@ -20,7 +20,7 @@ test('시연 오류는 거절되고 빈 결과와 복구는 구분된다',async(
   assert.ok((await getFeed('reader-tech','전체','normal')).items.length>0);
 });
 
-import {getFeedPage} from '../dist/src/service.js';
+import {getFeedPage} from '../.local/src/service.js';
 test('페이지를 끝까지 읽으면 전체 기사가 중복 없이 표시되고 종료된다',async()=>{
   const ids=[];let offset=0;
   do {const page=await getFeedPage('reader-tech','전체','normal',offset);ids.push(...page.items.map(item=>item.article.id));offset=page.nextOffset;}while(offset!==null);

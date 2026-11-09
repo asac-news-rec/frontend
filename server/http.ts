@@ -17,8 +17,8 @@ export function createNewsServer({root, origin, database, now, backendBaseUrl}:{
   const server = http.createServer(async (req, res) => {
     try {
       const pathname = new URL(req.url ?? '/', origin).pathname;
+      if(await backendProxy(req,res,pathname))return;
       if (pathname.startsWith('/api/')) {
-        if(await backendProxy(req,res,pathname))return;
         res.setHeader('Cache-Control', 'private, no-store');
         if (req.method === 'GET' && pathname === '/api/v1/categories') return respond(res, 200, {data:categories});
         const mutations = new Set(['/api/v1/visitors/bootstrap', '/api/v1/visitors/reset', '/api/v1/likes']);

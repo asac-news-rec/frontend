@@ -18,3 +18,5 @@ keys/
 *.key
 agent.local.md
 .claude/settings.local.json
+
+.local/

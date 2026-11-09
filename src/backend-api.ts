@@ -1,3 +1,4 @@
+import {backendImageUrl} from './image-url.js';
 interface BackendArticle {
   article_id: string;
   impression_id: string;
@@ -38,7 +39,7 @@ const legacyStorageKey='sai-news.backend-user-id';
 const uuid7=/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 async function request(route: string,body: object | undefined,method='POST',fetchImpl=fetch){
- const response=await fetchImpl('/api/v1/backend'+route,{method,credentials:'same-origin',cache:'no-store',
+ const response=await fetchImpl('/api'+route,{method,credentials:'same-origin',cache:'no-store',
   ...(body===undefined?{}:{headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})});
  if(!response.ok)throw new Error(`BACKEND_HTTP_${response.status}`);
  return response.json();
@@ -78,7 +79,7 @@ export async function getBackendPage(offset=0,{fetchImpl=fetch,getReaderId=getBa
    typeof item.is_synthetic!=='boolean'||typeof item.is_liked!=='boolean')throw new Error('INVALID_BACKEND_ARTICLE');
   const article={id:item.article_id,title:item.title,summary:item.summary??'',paragraphs:item.paragraphs,
    body:item.paragraphs.join('\n\n'),category:item.category,publisher:item.publisher??'언론사 미제공',
-   subcategory:item.subcategory??null,publishedAt:item.published_at,imageUrl:item.image_url??null,imageCaption:item.image_caption??null,
+   subcategory:item.subcategory??null,publishedAt:item.published_at,imageUrl:backendImageUrl(item.image_url),imageCaption:item.image_caption??null,
    synthetic:item.is_synthetic,impressionId:item.impression_id,requestId:response.request_id,art:'library'};
   return {article,rank:item.position,reason:'',impressionId:item.impression_id,isLiked:item.is_liked};
  });
