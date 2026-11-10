@@ -5,33 +5,73 @@ let collectionEnabled=false;
 export const behaviorReader=()=>readerId;
 const pending=new Map<string,{event:BehaviorEvent;created:number;attempts:number;inflight:boolean}>();
 const key='sai-news.behavior-pending';
+let dropped=0,retrying=0,lastError:string|null=null;
+let sessionState:'ready'|'recovering'|'blocked'='ready',sessionGeneration=0,nextRecoveryAt=0;
+let recovery:Promise<boolean>|null=null;
+let notice:HTMLElement|null=null;
+function errorCode(body:unknown,fallback:string){const value=(body as {error?:unknown})?.error;return typeof value==='string'&&/^[A-Z_]{1,80}$/.test(value)?value:fallback;}
+function drop(id:string,reason:string){if(pending.delete(id)){dropped++;lastError=reason;}}
 export function setBehaviorCollection(enabled:boolean){
  collectionEnabled=enabled&&readerId!==null;
- if(!collectionEnabled){pending.clear();persist();report();}
+ if(!collectionEnabled){if(pending.size){dropped+=pending.size;lastError='COLLECTION_DISABLED';}pending.clear();persist();report();}
 }
-function persist(){try{sessionStorage.setItem(key,JSON.stringify({readerId,entries:[...pending.values()].map(({event,created})=>({event,created}))}));}catch{}}
-function report(){globalThis.document?.dispatchEvent(new CustomEvent('behavior-queue-changed',{detail:{pending:pending.size}}));}
+function persist(){try{sessionStorage.setItem(key,JSON.stringify({readerId,dropped,entries:[...pending.values()].map(({event,created})=>({event,created}))}));}catch{}}
+function report(){
+ const document=globalThis.document;if(!document)return;
+ document.dispatchEvent(new CustomEvent('behavior-queue-changed',{detail:{pending:pending.size,dropped,retrying,lastError,sessionState}}));
+ if(!notice){notice=document.createElement('p');notice.className='behavior-notice';notice.setAttribute('role','status');document.body.append(notice);}
+ notice.hidden=!lastError&&!dropped;
+ notice.textContent=notice.hidden?'':`이용 기록 전송이 지연되거나 일부 기록을 보내지 못했습니다. 대기 ${pending.size}건 · 폐기 ${dropped}건`;
+}
+async function recoverSession(){
+ if(recovery)return recovery;
+ if(!collectionEnabled||!readerId||Date.now()<nextRecoveryAt)return false;
+ const identity=readerId;
+ sessionState='recovering';report();
+ recovery=(async()=>{
+  try{
+   const response=await fetch('/api/behavior/session',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({reader_id:identity}),signal:AbortSignal.timeout(1500)});
+   const body=await response.json().catch(()=>null);
+   if(!response.ok)throw new Error(errorCode(body,`HTTP_${response.status}`));
+   if(body?.reader_id!==identity)throw new Error('LOGGING_READER_MISMATCH');
+   if(readerId!==identity||!collectionEnabled)return false;
+   sessionGeneration++;sessionState='ready';lastError=null;nextRecoveryAt=0;return true;
+  }catch(error){sessionState='blocked';lastError=error instanceof Error?error.message:'SESSION_RECOVERY_FAILED';nextRecoveryAt=Date.now()+30000;return false;}
+  finally{report();}
+ })();
+ try{return await recovery;}finally{recovery=null;}
+}
+export function retryBehaviorEvents(){nextRecoveryAt=0;for(const entry of pending.values())void attempt(entry);}
 async function attempt(entry:{event:BehaviorEvent;created:number;attempts:number;inflight:boolean}){
  if(!collectionEnabled||entry.inflight||pending.get(entry.event.event_id)!==entry)return;
- if(Date.now()-entry.created>=1800000){pending.delete(entry.event.event_id);persist();report();return;}
+ if(Date.now()-entry.created>=1800000){drop(entry.event.event_id,'EVENT_EXPIRED');persist();report();return;}
  entry.inflight=true;entry.attempts++;
+ const generation=sessionGeneration;let immediate=false;
  try{
   const response=await fetch('/api/behavior/events',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({events:[entry.event]}),keepalive:true,signal:AbortSignal.timeout(10000)});
   if(!collectionEnabled||pending.get(entry.event.event_id)!==entry)return;
-  if([400,401,403,409,413,415].includes(response.status)){pending.delete(entry.event.event_id);return;}
+  if(response.status===401||response.status===403){
+   const body=await response.json().catch(()=>null);lastError=errorCode(body,`HTTP_${response.status}`);retrying++;
+   if(lastError==='SESSION_REQUIRED')immediate=sessionGeneration!==generation||await recoverSession();
+   else sessionState='blocked';
+   return;
+  }
+  if([400,409,413,415].includes(response.status)){drop(entry.event.event_id,`HTTP_${response.status}`);return;}
   if(!response.ok)throw new Error('LOGGING_UNAVAILABLE');
   const ack=(await response.json()).results?.find((r:{event_id:string})=>r.event_id===entry.event.event_id);
-  if(['accepted','duplicate','rejected'].includes(ack?.status))pending.delete(entry.event.event_id);
- }catch{}finally{
+  if(ack?.status==='rejected')drop(entry.event.event_id,errorCode({error:ack.code},'EVENT_REJECTED'));
+  else if(['accepted','duplicate'].includes(ack?.status)){pending.delete(entry.event.event_id);if(sessionState==='blocked')sessionState='ready';if(!pending.size)lastError=null;}
+  else{retrying++;lastError='UNCONFIRMED_ACK';}
+ }catch{retrying++;lastError='LOGGING_UNAVAILABLE';}finally{
   entry.inflight=false;persist();report();
-  if(pending.has(entry.event.event_id))setTimeout(()=>void attempt(entry),Math.min(30000,1000*2**Math.min(entry.attempts,5)));
+  if(pending.get(entry.event.event_id)===entry)setTimeout(()=>void attempt(entry),immediate?0:Math.min(30000,1000*2**Math.min(entry.attempts,5)));
  }
 }
 export function recordBehavior(kind:string,impressionId:string|undefined,page='list',extra:Partial<BehaviorEvent>={}){
  if(!collectionEnabled||!readerId||!impressionId)return;
  const event:BehaviorEvent={event_id:crypto.randomUUID(),event_type:kind,event_time:new Date().toISOString(),impression_id:impressionId,page_type:page,...extra};
- if(pending.size>=500)pending.delete(pending.keys().next().value!);
- while(pending.size&&new TextEncoder().encode(JSON.stringify([...pending.values()].map(e=>e.event))).length>520192)pending.delete(pending.keys().next().value!);
+ if(pending.size>=500)drop(pending.keys().next().value!,'QUEUE_LIMIT');
+ while(pending.size&&new TextEncoder().encode(JSON.stringify([...pending.values()].map(e=>e.event))).length>520192)drop(pending.keys().next().value!,'QUEUE_LIMIT');
  const entry={event:JSON.parse(JSON.stringify(event)) as BehaviorEvent,created:Date.now(),attempts:0,inflight:false};
  pending.set(event.event_id,entry);persist();report();void attempt(entry);
 }
@@ -50,7 +90,8 @@ export async function initializeBehavior(){
   if(entry.event?.event_id&&typeof entry.created==='number'&&Date.now()-entry.created<1800000)pending.set(entry.event.event_id,{event:entry.event,created:entry.created,attempts:0,inflight:false});
  }}catch{}
  persist();for(const entry of pending.values())void attempt(entry);
- window.addEventListener('online',()=>{for(const entry of pending.values())void attempt(entry);});
+ window.addEventListener('online',retryBehaviorEvents);
+ window.addEventListener('focus',retryBehaviorEvents);
  window.addEventListener('pagehide',()=>{for(const entry of pending.values())navigator.sendBeacon('/api/behavior/events',new Blob([JSON.stringify({events:[entry.event]})],{type:'application/json'}));});
  }catch{
   readerId=null;setBehaviorCollection(false);

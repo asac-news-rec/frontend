@@ -33,7 +33,7 @@ export function createBehaviorBridge(origin:string,backendUrl:string|undefined,c
   },
   async onFeed(req:IncomingMessage,input:unknown,payload:unknown){
    if(!config)return;
-   const session=current(req),body=input as {reader_id?:string};
+   const session=current(req)??current(req,'news_reader'),body=input as {reader_id?:string};
    if(!session||body.reader_id!==session.readerId)return false;
    const feed=payload as {request_id:string;served_at:string;reader_id?:string;items:{article_id:string;impression_id:string;position:number}[]};
    if(feed.reader_id!==undefined&&feed.reader_id!==session.readerId)return false;
