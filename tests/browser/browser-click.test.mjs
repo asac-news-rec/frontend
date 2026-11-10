@@ -6,19 +6,15 @@ import {randomUUID} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright';
 import {createDevServer} from '../../.local/server/dev-http.js';
-import {createLoggingHttp} from '../../services/logging-server/http.mjs';
-import {openLoggingStore} from '../../services/logging-server/repository.mjs';
+import {startFastApiLogging} from '../helpers/fastapi-logging.mjs';
 import {runBrowserClick} from '../../scripts/browser-click-agent.mjs';
 
 test('real browser click reaches SQLite once, isolated readers and invalid choices stay separate',async t=>{
- const token=randomUUID(),agentToken=randomUUID(),store=openLoggingStore({database:':memory:'});
+ const token=randomUUID(),agentToken=randomUUID();
+ const {url:loggingUrl,store}=await startFastApiLogging(t,token);
  const listen=async server=>{server.listen(0,'127.0.0.1');await once(server,'listening');t.after(()=>new Promise(resolve=>server.close(resolve)));return `http://127.0.0.1:${server.address().port}`;};
- t.after(()=>store.close());
- const loggingUrl=await listen(createLoggingHttp({store,token,exporter:{state:()=>({})}}));
- const feeds=[],events=[];
+ const feeds=[];
  const getAction=store.getAction.bind(store);
- const intake=store.intakeActions.bind(store);
- store.intakeActions=(context,body)=>{const result=intake(context,body);events.push(...body.events);return result;};
  let serial=0;
  const backend=await listen(createServer(async(req,res)=>{
   const chunks=[];for await(const c of req)chunks.push(c);
@@ -43,6 +39,7 @@ test('real browser click reaches SQLite once, isolated readers and invalid choic
  assert.equal((await fetch(url+'/api/synthetic/session',{method:'POST'})).status,401);
  assert.equal((await fetch(url+'/api/synthetic/events',{method:'POST',headers:{Origin:url,'Content-Type':'application/json'},body:'{}'})).status,403);
  assert.deepEqual(await run(async context=>{assert.equal(context.articles[0].title,'AI 산업 소식');return {article_id:context.articles[0].article_id};}),{status:'clicked',candidates:2,accepted:true});
+ const events=store.actions().map(row=>JSON.parse(row.canonical_json));
  assert.equal(events.length,1);
  const saved=getAction(events[0].event_id);
  assert.equal(saved.source,'simulator');assert.equal(saved.event_type,'article_open');
@@ -50,10 +47,10 @@ test('real browser click reaches SQLite once, isolated readers and invalid choic
  assert.equal(served.article_id,'article-0');assert.equal(served.reader_id,feeds[0].reader_id);
  assert.equal((await run(async()=>({article_id:null}))).status,'skipped');
  await assert.rejects(run(async()=>({article_id:'not-in-screen'})),/INVALID_CHOICE/);
- assert.equal(events.length,1);assert.equal(new Set(feeds.map(f=>f.reader_id)).size,3);
+ assert.equal(store.actions().length,1);assert.equal(new Set(feeds.map(f=>f.reader_id)).size,3);
  assert.equal(store.counts().actions,1);
  // Re-delivery of the exact same click remains one SQLite row.
- const duplicate=store.intakeActions({readerId:served.reader_id,collectionEnabled:true,source:'simulator'},{events:[events[0]]});
+ const duplicate=await store.intakeActions({readerId:served.reader_id,collectionEnabled:true,source:'simulator'},{events:[events[0]]});
  assert.equal(duplicate.results[0].status,'duplicate');assert.equal(store.counts().actions,1);
  const before=store.counts();
  const ordinary=await browser.newContext();

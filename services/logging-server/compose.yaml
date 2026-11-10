@@ -10,7 +10,7 @@ services:
     init: true
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4195/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4195/health', timeout=3)"]
       interval: 10s
       timeout: 5s
       retries: 3

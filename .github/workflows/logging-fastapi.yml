@@ -1,0 +1,32 @@
+name: FastAPI logging
+on:
+  pull_request:
+    paths:
+      - 'services/logging-server/**'
+      - 'tests/integration/**'
+      - 'tests/helpers/**'
+      - 'scripts/synthetic-logging-agent.mjs'
+      - '.github/workflows/logging-fastapi.yml'
+  push:
+    branches: [main]
+    paths: ['services/logging-server/**']
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/logging-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m compileall -q logging_service
+      - run: python -m pytest python_tests -q
+      - run: node --test ../../tests/integration/fastapi-logging.test.mjs
