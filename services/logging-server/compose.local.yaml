@@ -1,0 +1,56 @@
+# Isolated development stack. No real GCS credentials or cloud resources required.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: logging
+      POSTGRES_DB: logging
+      POSTGRES_PASSWORD: "${LOCAL_POSTGRES_PASSWORD:?Set local DB password}"
+    ports: ["127.0.0.1:${LOCAL_POSTGRES_PORT:-55432}:5432"]
+    volumes: ["logging-postgres:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U logging -d logging"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  gcs:
+    image: fsouza/fake-gcs-server:1.54
+    command: ["-scheme", "http", "-external-url", "http://gcs:4443"]
+    ports: ["127.0.0.1:${LOCAL_GCS_PORT:-4443}:4443"]
+    volumes: ["logging-gcs:/storage"]
+  gcs-init:
+    build: .
+    command: ["python", "-m", "logging_service.init_emulator"]
+    environment:
+      STORAGE_EMULATOR_HOST: http://gcs:4443
+      GOOGLE_CLOUD_PROJECT: local-integration
+      GCS_BUCKET: integration-raw-logs
+    depends_on: [gcs]
+  logging:
+    build: .
+    ports: ["127.0.0.1:${LOGGING_PORT:-4195}:4195"]
+    environment: &logging-env
+      LOGGING_TOKEN: "${LOGGING_TOKEN:?Set LOGGING_TOKEN}"
+      LOGGING_STORE: postgres
+      LOGGING_DATABASE_URL: "postgresql://logging:${LOCAL_POSTGRES_PASSWORD:?Set local DB password}@postgres:5432/logging"
+      STORAGE_EMULATOR_HOST: http://gcs:4443
+      GOOGLE_CLOUD_PROJECT: local-integration
+      GCS_BUCKET: integration-raw-logs
+    depends_on:
+      postgres: {condition: service_healthy}
+      gcs-init: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4195/health', timeout=3)"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  worker:
+    build: .
+    command: ["python", "-m", "logging_service.worker"]
+    environment: *logging-env
+    depends_on:
+      postgres: {condition: service_healthy}
+      gcs-init: {condition: service_completed_successfully}
+volumes:
+  logging-postgres:
+  logging-gcs:

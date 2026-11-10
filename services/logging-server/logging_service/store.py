@@ -174,7 +174,7 @@ class Store:
     def jobs(self, force=False):
         return [dict(r) for r in self.db.execute("SELECT j.* FROM export_jobs j WHERE status!='uploaded' AND NOT EXISTS(SELECT 1 FROM revoked_users r WHERE r.reader_id=j.reader_id) AND (? OR next_attempt_at<=?) ORDER BY created_at,job_id", (int(force), self.now()))]
 
-    def mark(self, job, error=None):
+    def mark(self, job, error=None, receipt=None):
         if error is None:
             self.db.execute("UPDATE export_jobs SET status='uploaded',last_error=NULL,attempts=attempts+1 WHERE job_id=?", (job["job_id"],))
         else:

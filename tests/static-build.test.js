@@ -6,7 +6,7 @@ test('배포 결과에는 브라우저 의존성만 있고 모든 모듈과 화�
   const root=new URL('../dist/',import.meta.url);
   assert.deepEqual((await readdir(root)).sort(),['index.html','src']);
   const files=(await readdir(new URL('src/',root))).sort();
-  assert.deepEqual(files,['app.js','backend-api.js','image-url.js','likes.js','style.css','synthetic-events.js','types.js']);
+  assert.deepEqual(files,['app.js','backend-api.js','behavior-events.js','image-url.js','likes.js','style.css','synthetic-events.js','types.js']);
   const html=await readFile(new URL('index.html',root),'utf8');
   for(const [,asset] of html.matchAll(/(?:src|href)="\.\/([^"]+)"/g))await readFile(new URL(asset,root));
   for(const file of files.filter(name=>name.endsWith('.js'))) {

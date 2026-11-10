@@ -6,6 +6,7 @@ COPY src ./src
 COPY server ./server
 COPY scripts ./scripts
 COPY tests ./tests
+COPY services/logging-server/*.mjs ./services/logging-server/
 RUN npm run check && npm test && npm run build
 
 # Optional local container; never used as the GCP frontend runtime.
@@ -14,6 +15,9 @@ ENV HOST=0.0.0.0 PORT=4173
 EXPOSE 4173
 USER node
 CMD ["node", ".local/dev-server.js"]
+
+# Same-origin logging gateway behind the existing static Nginx frontend.
+FROM local AS behavior-proxy
 
 # docker build --target static --output type=local,dest=./site .
 FROM scratch AS static

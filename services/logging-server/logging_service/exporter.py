@@ -1,4 +1,5 @@
 import os
+from contextlib import nullcontext
 from pathlib import Path
 
 from .schema import compact, digest, iso
@@ -47,17 +48,21 @@ class Exporter:
         self.state = {"lastSuccess": None, "lastError": None}
 
     def flush(self, force=False):
-        with self.store.lock:
+        with self.store.lock, (self.store.export_lock() if hasattr(self.store, "export_lock") else nullcontext(True)) as acquired:
+            if not acquired:
+                return 0
             self.store.prepare_exports()
             completed = 0
             for job in self.store.jobs(force):
                 try:
-                    self.sink.put(job["object_name"], job["content"])
+                    receipt = self.sink.put(job["object_name"], job["content"])
                     self.after_write(job)
                     manifest = {key: job[key] for key in ("job_id", "object_name", "stream", "partition_path", "row_count", "content_hash")}
                     manifest.update(schema_version=1, prepared_at=job["created_at"])
+                    if receipt:
+                        manifest["storage"] = receipt
                     self.sink.put(f"manifests/{job['job_id']}.json", compact(manifest) + "\n")
-                    self.store.mark(job)
+                    self.store.mark(job, receipt=receipt)
                     completed += 1
                     self.state.update(lastSuccess=iso(self.store.now()), lastError=None)
                 except Exception as error:
@@ -66,7 +71,7 @@ class Exporter:
             return completed
 
     def delete(self, reader):
-        with self.store.lock:
+        with self.store.lock, (self.store.export_lock(wait=True) if hasattr(self.store, "export_lock") else nullcontext(True)):
             for job in self.store.revoke(reader):
                 self.sink.remove(job["object_name"])
                 self.sink.remove(f"manifests/{job['job_id']}.json")

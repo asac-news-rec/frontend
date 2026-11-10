@@ -1,3 +1,4 @@
+import {behaviorReader} from './behavior-events.js';
 import {backendImageUrl} from './image-url.js';
 import {rememberSyntheticImpressions} from './synthetic-events.js';
 interface BackendArticle {
@@ -48,6 +49,7 @@ async function request(route: string,body: object | undefined,method='POST',fetc
 
 export async function getBackendReaderId({storage=globalThis.window?.localStorage,fetchImpl=fetch,locks=globalThis.window?.navigator?.locks}={}){
  const readOrCreate=async()=>{
+  const verified=behaviorReader();if(verified)return verified;
   if(!storage)throw new Error('BACKEND_ID_STORAGE_UNAVAILABLE');
   const existing=storage.getItem(storageKey);
   if(existing!==null){if(!uuid7.test(existing))throw new Error('INVALID_BACKEND_READER_ID');return existing;}

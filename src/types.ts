@@ -7,6 +7,7 @@ export interface Reader {
 }
 
 export interface Article {
+  impressionId?: string;
   id: string;
   title: string;
   summary: string;

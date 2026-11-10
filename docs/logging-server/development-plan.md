@@ -259,3 +259,7 @@ GCS adapter·클라우드 배포·Airflow/BQ 작업은 구현하지 않았다. �
 ## 2026-11-10 FastAPI 전환
 
 현재 실행 진입점은 `services/logging-server/logging_service`의 독립 FastAPI 서비스입니다. 기존 Node 진입점은 Python 실행 호환기로 바뀌었습니다. SQLite schema v5·영속 ACK·중복 판정·5분 JSONL·manifest·복구·삭제를 유지합니다. 백엔드 파일 전송용 `/internal/served-file`은 multipart 전체 원자 수락을 지원합니다. 백엔드 전송기 인증 헤더 연결은 별도 담당자 변경이 필요하며 운영 통합 완료를 의미하지 않습니다. 위의 Node 설계·단계 기록은 개발 당시의 이력입니다. 최신 실행·검증·마이그레이션은 [서비스 README](../../services/logging-server/README.md)를 따릅니다.
+
+## 2026-11-10 PostgreSQL·GCS 연결
+
+일반 화면의 노출·클릭·좋아요/취소를 같은 출처 프록시로 전달하고 PostgreSQL 커밋 후 ACK하도록 확장했습니다. worker는 별도 프로세스에서 발생 시각 KST 5분 구간 JSONL을 GCS에 조건부 생성하고 receipt와 작업 상태를 갱신합니다. 테이블을 5분 단위로 나누지 않습니다. 최신 실행·재시도·권한·검증 범위는 [서비스 README](../../services/logging-server/README.md)를 따릅니다. 로컬 에뮬레이터 검증과 실제 GCP 연결을 구분합니다.
