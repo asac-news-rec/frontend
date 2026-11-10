@@ -38,3 +38,16 @@ test('같은 출처 프록시는 태원님 API의 경로·method·본문을 유�
  assert.equal((await post('/api/v1/backend/news/feed','POST',{reader_id:'reader',offset:0})).status,404);
  assert.equal(received.length,6);
 });
+
+test('served hook failure preserves news response while real backend failure stays an error',async t=>{
+ const origin='http://127.0.0.1:4173';let mode='logging-error',hooks=0;
+ const proxy=createBackendProxy({baseUrl:'http://fixture.invalid/',origin,fetchImpl:async()=>{
+  if(mode==='backend-network')throw new Error('backend offline');
+  return new Response(JSON.stringify(mode==='backend-http'?{error:'NEWS_UNAVAILABLE'}:{items:[],next_offset:null}),{status:mode==='backend-http'?503:200,headers:{'Content-Type':'application/json'}});
+ },onFeed:async()=>{hooks++;throw new Error('PostgreSQL unavailable');}});
+ const server=createServer(async(req,res)=>{await proxy(req,res,new URL(req.url,origin).pathname);});server.listen(0,'127.0.0.1');await once(server,'listening');t.after(()=>new Promise(resolve=>server.close(resolve)));
+ const request=()=>fetch(`http://127.0.0.1:${server.address().port}/api/news/feed`,{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({reader_id:'fixture-reader',offset:0})});
+ let response=await request();assert.equal(response.status,200);assert.deepEqual(await response.json(),{items:[],next_offset:null,collection_enabled:false});assert.equal(hooks,1);
+ mode='backend-network';response=await request();assert.equal(response.status,503);assert.deepEqual(await response.json(),{error:'BACKEND_UNAVAILABLE'});
+ mode='backend-http';response=await request();assert.equal(response.status,503);assert.deepEqual(await response.json(),{error:'NEWS_UNAVAILABLE'});assert.equal(hooks,1);
+});

@@ -22,7 +22,8 @@ test('same-origin bridge binds signed reader and replaces forged source headers'
  assert.equal(seen[1].headers['x-news-reader'],reader);assert.equal(seen[1].headers['x-news-source'],'browser');assert.equal(seen[1].headers.authorization,`Bearer ${token}`);
  assert.equal((await post('/api/behavior/events',{events:[action]},cookie+'tampered')).status,403);
  assert.equal((await post('/api/behavior/events',{events:[action]},cookie,{Origin:'https://other.invalid'})).status,403);
- assert.equal((await post('/api/news/feed',{reader_id:'other',offset:0},cookie)).status,503);
+ const unbound=await post('/api/news/feed',{reader_id:'other',offset:0},cookie);
+ assert.equal(unbound.status,200);assert.equal((await unbound.json()).collection_enabled,false);
  assert.equal(seen.length,2);
  // A fresh bridge instance accepts the same signed cookie, without in-memory state.
  const {createBehaviorBridge}=await import('../.local/server/behavior-bridge.js');

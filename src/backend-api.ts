@@ -1,4 +1,4 @@
-import {behaviorReader} from './behavior-events.js';
+import {behaviorReader,setBehaviorCollection} from './behavior-events.js';
 import {backendImageUrl} from './image-url.js';
 import {rememberSyntheticImpressions} from './synthetic-events.js';
 interface BackendArticle {
@@ -71,7 +71,7 @@ export async function getBackendReaderId({storage=globalThis.window?.localStorag
 
 export async function getBackendPage(offset=0,{fetchImpl=fetch,getReaderId=getBackendReaderId,filters={}}: {fetchImpl?: typeof fetch; getReaderId?: typeof getBackendReaderId; filters?: BackendFilters}={}){
  const readerId=await getReaderId();
- const response: {reader_id?: string; request_id: string; served_at: string; items: BackendArticle[]; next_offset: number | null}=await request('/news/feed',{reader_id:readerId,offset,...(filters.category?{category:filters.category}:{}),...(filters.subcategory?{subcategory:filters.subcategory}:{})},'POST',fetchImpl);
+ const response: {collection_enabled?:boolean; reader_id?: string; request_id: string; served_at: string; items: BackendArticle[]; next_offset: number | null}=await request('/news/feed',{reader_id:readerId,offset,...(filters.category?{category:filters.category}:{}),...(filters.subcategory?{subcategory:filters.subcategory}:{})},'POST',fetchImpl);
  if(!response||(response.reader_id!==undefined&&response.reader_id!==readerId)||typeof response.request_id!=='string'||!Number.isFinite(Date.parse(response.served_at))||
   !Array.isArray(response.items)||!(response.next_offset===null||typeof response.next_offset==='number'&&Number.isSafeInteger(response.next_offset)&&response.next_offset>=0))throw new Error('INVALID_BACKEND_FEED');
  const items=response.items.map((item: BackendArticle)=>{
@@ -87,6 +87,7 @@ export async function getBackendPage(offset=0,{fetchImpl=fetch,getReaderId=getBa
   return {article,rank:item.position,reason:'',impressionId:item.impression_id,isLiked:item.is_liked};
  });
  rememberSyntheticImpressions(response.items);
+ if(typeof response.collection_enabled==='boolean')setBehaviorCollection(response.collection_enabled);
  return {generatedAt:response.served_at,strategy:'backend_latest',requestId:response.request_id,
   items,nextOffset:response.next_offset};
 }

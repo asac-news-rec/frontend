@@ -16,8 +16,8 @@ export function createBehaviorBridge(origin:string,backendUrl:string|undefined,c
    if(typeof session.readerId==='string'&&session.readerId.length<=128&&typeof session.expires==='number'&&session.expires>Date.now())return session;
   }catch{}
  };
- const send=async(route:string,body:unknown,readerId?:string)=>{
-  const response=await fetch(new URL(route,config!.url),{method:'POST',signal:AbortSignal.timeout(8000),headers:{'Content-Type':'application/json',Authorization:`Bearer ${config!.token}`,...(readerId?{'x-news-reader':readerId,'x-collection-enabled':'true','x-news-source':'browser'}:{})},body:JSON.stringify(body)});
+ const send=async(route:string,body:unknown,readerId?:string,signal=AbortSignal.timeout(8000))=>{
+  const response=await fetch(new URL(route,config!.url),{method:'POST',signal,headers:{'Content-Type':'application/json',Authorization:`Bearer ${config!.token}`,...(readerId?{'x-news-reader':readerId,'x-collection-enabled':'true','x-news-source':'browser'}:{})},body:JSON.stringify(body)});
   if(!response.ok)throw new Error('LOGGING_UNAVAILABLE');
   return response.json();
  };
@@ -25,14 +25,16 @@ export function createBehaviorBridge(origin:string,backendUrl:string|undefined,c
   async onFeed(req:IncomingMessage,input:unknown,payload:unknown){
    if(!config)return;
    const session=current(req),body=input as {reader_id?:string};
-   if(!session||body.reader_id!==session.readerId)throw new Error('LOGGING_SESSION_REQUIRED');
+   if(!session||body.reader_id!==session.readerId)return false;
    const feed=payload as {request_id:string;served_at:string;reader_id?:string;items:{article_id:string;impression_id:string;position:number}[]};
-   if(feed.reader_id!==undefined&&feed.reader_id!==session.readerId)throw new Error('READER_MISMATCH');
+   if(feed.reader_id!==undefined&&feed.reader_id!==session.readerId)return false;
    const records=feed.items.map(item=>({request_id:feed.request_id,served_at:feed.served_at,reader_id:session.readerId,article_id:item.article_id,impression_id:item.impression_id,position:item.position}));
+   const deadline=AbortSignal.timeout(1500);
    for(let start=0;start<records.length;start+=100){
-    const part=records.slice(start,start+100),ack=await send('/internal/served',{records:part});
+    const part=records.slice(start,start+100),ack=await send('/internal/served',{records:part},undefined,deadline);
     if(!Array.isArray(ack.results)||ack.results.length!==part.length||ack.results.some((r:{status:string;impression_id:string},i:number)=>!['accepted','duplicate'].includes(r.status)||r.impression_id!==part[i].impression_id))throw new Error('SERVED_NOT_COMMITTED');
    }
+   return true;
   },
   async handle(req:IncomingMessage,res:ServerResponse,pathname:string){
    if(!pathname.startsWith('/api/behavior/'))return false;
