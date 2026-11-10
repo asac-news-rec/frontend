@@ -14,7 +14,21 @@
 
 `reader_id`는 가상 독자 식별자다. `article_id`는 입력 목록의 기사 식별자다. `request_id`는 한 목록 제공의 식별자, `impression_id`는 제공된 기사별 식별자, `event_id`는 클릭의 UUID다. `served_at`과 `event_time`은 UTC다. 재시도 큐는 아직 없으며 요청 실패 시 실행을 중단한다. 모델 선택은 실제 독자의 클릭이나 체류 시간을 측정하지 않는다. 로컬 로깅 서버 계약에는 체류 시간 이벤트가 없으므로 이번 스크립트는 체류를 만들지 않는다.
 
-## 실행
+## 로깅 서버 없이 JSON 실험
+
+루트 `.env`의 `OPENROUTER_API_KEY`를 설정한 뒤 `npm run agent:json`을 실행합니다. 사전 빌드 후 가상 독자 5명과 시연 기사 8건으로 각각 실제 모델 선택을 한 번 수행합니다. 뉴스 백엔드·브라우저·로깅 서버는 필요하지 않습니다. `OPENROUTER_MODEL`로 모델을 지정할 수 있으며 기본값은 기존 합성 에이전트와 같습니다.
+
+```powershell
+npm run agent:json
+# 결과 경로를 지정할 때 (기존 파일은 덮어쓰지 않음)
+npm run agent:json -- --output data/my-experiment.json
+```
+
+결과는 기본 `data/synthetic-experiment-<UTC시각>.json`에 저장합니다. 파일에는 실행 ID, 모델, 페르소나, 후보 기사, 선택한 기사 ID, 제공 기록과 합성 이벤트가 들어갑니다. `browser_used:false`, `logging_server_used:false`이므로 실제 브라우저 클릭이나 서버 수락 기록으로 해석하지 않습니다. 클릭하지 않는 선택은 `selected_article_id:null`, 이벤트 빈 배열로 남깁니다. 진행 중 결과도 저장하며 `completed:true`인 경우에만 전체 완료입니다. 실행이 실패하면 이미 완료된 독자 결과를 보존하고 종료 코드 1을 반환합니다. 인증 키와 토큰은 저장하지 않습니다.
+
+현재 입력은 실제 수집 기사가 아닌 프런트 시연 데이터이며 반복 실행 결과가 달라질 수 있습니다. 결과 `data/`는 Git 추적에서 제외됩니다.
+
+## 직접 전송 에이전트 실행
 
 `examples/synthetic-personas.json`에는 서로 다른 관심사의 가상 독자 5명이 있다. 관심사 이름은 현재 **프런트엔드 시연 데이터**의 IT·과학, 스포츠, 문화, 사회, 생활을 기준으로 했다. 백엔드 DB의 `exports/news_articles.dump`는 이 작업 환경에서 읽을 수 없어 DB 카테고리와 일치한다고 확인하지 못했다. `scripts/make-synthetic-contexts.mjs`는 이 페르소나와 프런트엔드의 가상 기사 8건을 결합해 실행 입력을 만든다. 이 데이터는 로컬 경로 검증용이며 실제 수집 기사나 백엔드 DB의 기사 ID가 아니다.
 
