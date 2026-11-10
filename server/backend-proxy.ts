@@ -1,6 +1,6 @@
 import type {IncomingMessage,ServerResponse} from 'node:http';
 
-export function createBackendProxy({baseUrl,origin,fetchImpl=fetch,onFeed}:{baseUrl?:string;origin:string;fetchImpl?:typeof fetch;onFeed?:(req:IncomingMessage,input:unknown,payload:unknown)=>Promise<boolean|void>}) {
+export function createBackendProxy({baseUrl,origin,fetchImpl=fetch,onFeed,onReaderIssued}:{baseUrl?:string;origin:string;fetchImpl?:typeof fetch;onFeed?:(req:IncomingMessage,input:unknown,payload:unknown)=>Promise<boolean|void>;onReaderIssued?:(req:IncomingMessage,res:ServerResponse,payload:unknown)=>void}) {
  const target=baseUrl?new URL(baseUrl.endsWith('/')?baseUrl:`${baseUrl}/`):null;
  return async (req:IncomingMessage,res:ServerResponse,pathname:string):Promise<boolean>=>{
   if(!['/api/user/anonymous','/api/category','/api/subcategory','/api/news/feed'].includes(pathname)&&!pathname.startsWith('/api/news/'))return false;
@@ -30,6 +30,7 @@ export function createBackendProxy({baseUrl,origin,fetchImpl=fetch,onFeed}:{base
    const upstream=await fetchImpl(new URL('api'+route,target),{method,headers:['/user/anonymous','/category'].includes(route)?{}:{'Content-Type':'application/json'},...(body.length?{body}:{}),signal:AbortSignal.timeout(8000)});
    if(!upstream.headers.get('content-type')?.includes('application/json'))return reply(502,{error:'INVALID_BACKEND_RESPONSE'});
    let payload=await upstream.json();
+   if(upstream.ok&&route==='/user/anonymous'&&onReaderIssued)onReaderIssued(req,res,payload);
    if(upstream.ok&&route==='/news/feed'&&onFeed){
     let enabled:boolean|void;
     try{enabled=await onFeed(req,JSON.parse(body.toString('utf8')),payload);}catch{enabled=false;}

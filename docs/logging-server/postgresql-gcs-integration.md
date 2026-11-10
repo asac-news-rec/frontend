@@ -16,7 +16,7 @@
 2. 전용 로깅 DB와 LOGGING_DATABASE_URL Secret, Cloud SQL Auth Proxy 연결. 뉴스 테이블과 분리된 behavior_logging schema 사용
 3. worker에 객체 생성 + 읽기(storage.objects.get). 업로드 응답 유실 후 generation·동일 내용 확인에 필요. objectCreator 단독으로 부족
 4. 사용자 삭제 경로 사용 시 객체 삭제 권한을 별도로 부여. 키·암호·토큰 값은 이슈·문서에 적지 않음
-5. API와 worker 독립 실행, 기존 정적 Nginx의 behavior 경로와 news/feed 경로를 동일 출처 게이트웨이로 연결
+5. API와 worker 독립 실행, 기존 정적 Nginx의 behavior 경로와 news/feed·user/anonymous 경로를 동일 출처 게이트웨이로 연결
 6. 단일 worker 활성 잠금·보관 정책·DB 용량·worker 미처리 건수와 오래된 작업 알림
 7. 5분 경로는 KST 발생 시각, .jsonl suffix, 늦은 도착 추가 part, manifest는 작업별 표시라는 계약을 Airflow와 합의
 

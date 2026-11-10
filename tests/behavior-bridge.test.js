@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
 import {randomUUID} from 'node:crypto';
+import {Readable} from 'node:stream';
 import {createDevServer} from '../.local/server/dev-http.js';
 
 test('same-origin bridge binds signed reader and replaces forged source headers',async t=>{
@@ -14,7 +15,10 @@ test('same-origin bridge binds signed reader and replaces forged source headers'
  const origin=`http://127.0.0.1:${port}`;
  const server=createDevServer({root:process.cwd(),origin,backendBaseUrl:backend,logging:{url:logging,token}});server.listen(port,'127.0.0.1');await once(server,'listening');t.after(()=>new Promise(resolve=>server.close(resolve)));
  const post=(path,body,cookie='',extra={})=>fetch(origin+path,{method:'POST',headers:{Origin:origin,'Content-Type':'application/json',Cookie:cookie,...extra},...(body?{body:JSON.stringify(body)}:{})});
- const session=await post('/api/behavior/session');assert.equal(session.status,200);const cookie=session.headers.get('set-cookie').split(';')[0];assert.match(session.headers.get('set-cookie'),/HttpOnly/);assert.equal((await session.json()).reader_id,reader);
+ const issued=await post('/api/user/anonymous');const proof=issued.headers.get('set-cookie').split(';')[0];
+ const missing=await post('/api/behavior/session',{reader_id:reader});assert.equal(missing.status,403);
+ const mismatch=await post('/api/behavior/session',{reader_id:'019a0000-0000-7000-8000-000000000002'},proof);assert.equal(mismatch.status,403);
+ const session=await post('/api/behavior/session',{reader_id:reader},proof);assert.equal(session.status,200);const cookie=proof+'; '+session.headers.get('set-cookie').split(';')[0];assert.match(session.headers.get('set-cookie'),/HttpOnly/);assert.equal((await session.json()).reader_id,reader);
  assert.equal((await post('/api/news/feed',{reader_id:reader,offset:0},cookie)).status,200);
  assert.equal(seen[0].body.records[0].reader_id,reader);
  const action={event_id:randomUUID(),event_type:'article_open',event_time:new Date().toISOString(),impression_id:'imp',page_type:'list'};
@@ -29,6 +33,7 @@ test('same-origin bridge binds signed reader and replaces forged source headers'
  const {createBehaviorBridge}=await import('../.local/server/behavior-bridge.js');
  const bridge=createBehaviorBridge(origin,backend,{url:logging,token});
  const headers={};let responseBody;
- await bridge.handle({method:'POST',headers:{origin,cookie}},{writeHead(){},setHeader(k,v){headers[k]=v;},end(value){responseBody=JSON.parse(value);}},'/api/behavior/session');
+ const req=Readable.from([Buffer.from(JSON.stringify({reader_id:reader}))]);req.method='POST';req.headers={origin,cookie,'content-type':'application/json'};
+ await bridge.handle(req,{writeHead(){},setHeader(k,v){headers[k]=v;},end(value){responseBody=JSON.parse(value);}},'/api/behavior/session');
  assert.equal(responseBody.reader_id,reader);assert.equal(headers['Set-Cookie'],undefined);
 });

@@ -10,7 +10,7 @@ import {createBehaviorBridge,type LoggingConfig} from './behavior-bridge.js';
 export function createDevServer({root,origin,backendBaseUrl,synthetic,logging}:{root:string;origin:string;backendBaseUrl?:string;synthetic?:SyntheticConfig;logging?:LoggingConfig}) {
   const bridge=createSyntheticBridge(origin,synthetic);
   const behavior=createBehaviorBridge(origin,backendBaseUrl,synthetic?undefined:logging);
-  const proxy=createBackendProxy({baseUrl:backendBaseUrl,origin,onFeed:async(req,input,payload)=>{await bridge.onFeed(req,input,payload);return behavior.onFeed(req,input,payload);}});
+  const proxy=createBackendProxy({baseUrl:backendBaseUrl,origin,onReaderIssued:behavior.onReaderIssued,onFeed:async(req,input,payload)=>{await bridge.onFeed(req,input,payload);return behavior.onFeed(req,input,payload);}});
   return http.createServer(async(req,res)=>{
     try {
       const pathname=new URL(req.url??'/',origin).pathname;

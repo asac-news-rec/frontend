@@ -1,3 +1,4 @@
+import {getBackendReaderId} from './reader-identity.js';
 export interface BehaviorEvent {event_id:string;event_type:string;event_time:string;impression_id:string;page_type:string;duration_ms?:number;ended_at?:string}
 let readerId:string|null=null;
 let collectionEnabled=false;
@@ -39,13 +40,12 @@ export async function initializeBehavior(){
  try{
  const response=await fetch('/api/behavior/status',{credentials:'same-origin',signal:AbortSignal.timeout(1500)});
  if(!response.ok||(await response.json()).enabled!==true){setBehaviorCollection(false);return;}
- const session=await fetch('/api/behavior/session',{method:'POST',credentials:'same-origin',signal:AbortSignal.timeout(1500)});
+ const existing=await getBackendReaderId();
+ const session=await fetch('/api/behavior/session',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({reader_id:existing}),signal:AbortSignal.timeout(1500)});
  if(!session.ok)throw new Error('행동 수집 세션에 연결하지 못했습니다. 다시 불러와 주세요.');
  const identity=(await session.json()).reader_id;
- if(typeof identity!=='string'||!identity)throw new Error('INVALID_LOGGING_READER');
+ if(identity!==existing)throw new Error('LOGGING_READER_MISMATCH');
  readerId=identity;collectionEnabled=true;
- // Keep the same news/likes identity if collection later becomes unavailable.
- try{localStorage.setItem('sai-news.backend-reader-id',identity);}catch{}
  try{const saved=JSON.parse(sessionStorage.getItem(key)??'null');if(saved?.readerId===readerId&&Array.isArray(saved.entries))for(const entry of saved.entries.slice(-500)){
   if(entry.event?.event_id&&typeof entry.created==='number'&&Date.now()-entry.created<1800000)pending.set(entry.event.event_id,{event:entry.event,created:entry.created,attempts:0,inflight:false});
  }}catch{}

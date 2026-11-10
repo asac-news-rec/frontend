@@ -81,9 +81,15 @@ PostgreSQL `behavior_logging` 스키마에 served_records, action_records, expor
 
 ## 같은 출처 프록시와 독자 문맥
 
-프록시가 백엔드 `/user/anonymous`에서 발급받은 독자 ID를 HMAC 서명 HttpOnly 쿠키에 30일간 연결합니다. 이후 피드 요청의 reader_id가 쿠키와 같은 경우에만 최종 응답의 served 저장을 시도합니다. 저장 ACK를 확인한 응답에는 collection_enabled=true, 세션 불일치·저장 장애에는 collection_enabled=false를 붙입니다. 뉴스 백엔드의 정상 응답은 두 경우 모두 화면에 반환합니다. 서버 토큰과 독자/source 내부 헤더는 브라우저에서 받지 않습니다. 다른 독자의 impression_id는 로깅 서버에서도 거절합니다.
+뉴스 독자 ID의 단일 기준은 `src/reader-identity.ts`의 localStorage입니다. 기존 `sai-news.backend-reader-id`를 우선 사용하고, 이전 `sai-news.backend-user-id` 키가 있으면 같은 값으로 이전합니다. 둘 다 없을 때만 기존 `/api/user/anonymous`를 호출합니다. 피드·좋아요는 수집 활성 여부나 `behaviorReader()`를 확인하지 않고 항상 이 ID를 사용합니다.
 
-처음 일반 로깅을 켜면 기존 localStorage UUID와 별도인 서버 검증 독자로 시작합니다. 이후 프록시 재시작·여러 replica에서도 같은 서명 키가 있으면 쿠키를 검증할 수 있습니다. 키 교체나 쿠키 만료 시 새 독자를 발급합니다. 기존 익명 독자의 좋아요를 자동 이전하지 않습니다. 뉴스 API가 UUID를 인증 수단으로 취급하는 기존 계약과 실제 계정 인증을 혼동하지 않습니다.
+게이트웨이는 `/api/user/anonymous`의 성공 응답을 직접 관찰한 경우에만 해당 ID의 서명 HttpOnly `news_reader` 증명을 발급합니다. 수집 세션 API는 `{reader_id:기존ID}`를 받아 같은 ID의 유효한 `news_reader` 또는 기존 `news_behavior` 증명이 있는지 확인하고, `news_behavior` 수집 쿠키만 발급합니다. 이 API는 새 독자를 생성하지 않습니다. 두 쿠키의 서명 목적을 분리해 서로 바꿔 쓸 수 없게 했습니다. Origin·소유자·내부 토큰 검증도 유지합니다.
+
+기존 localStorage ID에 서버 발급 증명이 없으면 임의로 쿠키에 바인딩하거나 다른 독자를 발급하지 않습니다. 수집만 비활성화하고 같은 ID로 피드·좋아요를 유지합니다. UUID 형식이나 ID를 알고 있다는 사실만으로 소유권을 증명할 수 없기 때문입니다. 기존 사용자도 모두 수집하려면 백엔드의 소유권 검증/안전한 연결 계약이 추가로 필요합니다. 서로 다른 독자의 이력을 자동 병합하지 않습니다.
+
+수집 쿠키만 삭제하거나 만료돼도 독자 ID는 바뀌지 않습니다. 아직 유효한 reader 증명이 있으면 같은 ID로 수집 쿠키만 재발급합니다. reader 증명까지 없거나 만료되면 수집을 끄며, 새 독자를 생성하지 않습니다. 수집 해제·로깅 장애·키 교체도 독자 ID와 좋아요 소유자를 바꾸지 않습니다. localStorage 자체를 삭제했을 때만 원래 익명 독자 정책에 따라 새 ID를 발급합니다. 이전 버전에서 이미 덮어쓴 ID·분리된 이력을 이 변경이 임의 추정해 복원하지는 않습니다.
+
+이후 피드 요청의 reader_id가 수집 쿠키와 같은 경우에만 최종 응답의 served 저장을 시도합니다. 저장 ACK를 확인한 응답에는 collection_enabled=true, 세션 불일치·저장 장애에는 collection_enabled=false를 붙입니다. 뉴스 백엔드의 정상 응답은 두 경우 모두 화면에 반환합니다. 이 수집 문맥은 익명 뉴스 API 전체에 대한 계정 인증을 의미하지 않습니다.
 
 화면은 카드 50% 이상 표시·탭 visible·스크롤 정지 상태의 연속 구간을 exposure로 기록합니다. 구간 종료 시 전송하며 빠른 노출도 원본에 남깁니다. 클릭은 목록 링크 활성화 시 article_open, 좋아요/취소는 백엔드가 changed=true로 성공한 뒤에만 전송합니다. 조회·복원·실패는 좋아요 이벤트를 생성하지 않습니다. 상세 체류시간을 목록 노출에 합치지 않습니다.
 
@@ -91,7 +97,7 @@ PostgreSQL `behavior_logging` 스키마에 served_records, action_records, expor
 
 이 정책은 뉴스 가용성을 우선하며, 장애 구간의 제공·행동 데이터 완전성은 보장하지 않습니다. 커밋한 기록을 성공으로 되돌리거나 허위 ACK를 만들지 않습니다. 장애 중에도 모든 원본을 보존해야 한다면 별도로 영속 outbox와 검증 대기 수신을 구현해야 합니다. 실제 뉴스 백엔드 자체의 장애는 기존과 같이 오류로 표시합니다.
 
-GCP의 정적 프런트엔드는 기존 Nginx를 유지합니다. 같은 출처 행동 경로와 피드 경로만 별도 Node 게이트웨이로 전달합니다. 예시는 [Nginx include](../../docs/logging-server/behavior-proxy-nginx.conf)입니다. `docker build --target behavior-proxy`를 이용할 수 있습니다. NEWS_BACKEND_URL이 같은 피드 프록시로 돌아오는 순환 구조가 되지 않게 합니다. 이 프록시의 production Nginx/서비스 배포는 아직 실행하지 않았습니다.
+GCP의 정적 프런트엔드는 기존 Nginx를 유지합니다. 같은 출처 행동 경로·피드 경로·익명 독자 발급 경로를 별도 Node 게이트웨이로 전달합니다. 예시는 [Nginx include](../../docs/logging-server/behavior-proxy-nginx.conf)입니다. `docker build --target behavior-proxy`를 이용할 수 있습니다. NEWS_BACKEND_URL이 같은 피드 프록시로 돌아오는 순환 구조가 되지 않게 합니다. 이 프록시의 production Nginx/서비스 배포는 아직 실행하지 않았습니다.
 
 ## 수신 API
 
