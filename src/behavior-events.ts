@@ -92,6 +92,7 @@ export async function initializeBehavior(){
  persist();for(const entry of pending.values())void attempt(entry);
  window.addEventListener('online',retryBehaviorEvents);
  window.addEventListener('focus',retryBehaviorEvents);
+ window.addEventListener('pageshow',retryBehaviorEvents);
  window.addEventListener('pagehide',()=>{for(const entry of pending.values())navigator.sendBeacon('/api/behavior/events',new Blob([JSON.stringify({events:[entry.event]})],{type:'application/json'}));});
  }catch{
   readerId=null;setBehaviorCollection(false);

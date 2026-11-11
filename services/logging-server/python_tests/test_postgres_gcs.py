@@ -3,6 +3,7 @@ import os
 import subprocess
 import sys
 import time
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from uuid import uuid4
@@ -207,3 +208,49 @@ def test_postgres_file_batch_atomicity(database, sink):
         response = client.post("/internal/served-file", files={"file": ("feed.jsonl", "\n".join(json.dumps(r) for r in rows), "application/x-ndjson")}, data={"request_id": "req", "expected_item_count": "2"})
         assert response.status_code == 400
         assert client.get("/ready").json()["served"] == 1
+
+
+def test_lost_worker_lease_delete_then_late_gcs_write_is_swept(database, sink):
+    worker = PostgresStore(database)
+    deleter = PostgresStore(database)
+    row, _ = records()
+    worker.intake_served({"records": [row]})
+    before_write, resume = threading.Event(), threading.Event()
+    original_put = sink.put
+
+    class PausedSink:
+        def put(self, name, content):
+            if name.endswith(".jsonl"):
+                before_write.set()
+                assert resume.wait(10)
+            return original_put(name, content)
+
+        def remove(self, name):
+            return sink.remove(name)
+
+    pid = worker.connection.info.backend_pid
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(Exporter(worker, PausedSink()).flush, True)
+        try:
+            assert before_write.wait(10)
+            with psycopg.connect(database, autocommit=True) as admin:
+                admin.execute("SELECT pg_terminate_backend(%s)", (pid,))
+            Exporter(deleter, sink).delete("reader")
+            assert deleter.counts() == {"served": 0, "actions": 0}
+            assert len(deleter.deletion_targets()) == 2
+        finally:
+            resume.set()
+        with pytest.raises(Exception):
+            future.result(timeout=10)
+    worker.close()
+    # The already-issued external upload can still finish after deletion.
+    names = [b.name for b in sink.client.list_blobs(sink.bucket, prefix=sink.prefix)]
+    assert len(names) == 1 and names[0].endswith(".jsonl")
+    assert not deleter.jobs(True)
+    recovered = PostgresStore(database)
+    assert Exporter(recovered, sink).flush(True) == 0
+    assert not list(sink.client.list_blobs(sink.bucket, prefix=sink.prefix))
+    with pytest.raises(ValueError, match="USER_REVOKED"):
+        recovered.intake_actions({"events": [records()[1]]}, "reader", True)
+    recovered.close()
+    deleter.close()

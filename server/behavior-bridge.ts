@@ -38,6 +38,8 @@ export function createBehaviorBridge(origin:string,backendUrl:string|undefined,c
    const feed=payload as {request_id:string;served_at:string;reader_id?:string;items:{article_id:string;impression_id:string;position:number}[]};
    if(feed.reader_id!==undefined&&feed.reader_id!==session.readerId)return false;
    const records=feed.items.map(item=>({request_id:feed.request_id,served_at:feed.served_at,reader_id:session.readerId,article_id:item.article_id,impression_id:item.impression_id,position:item.position}));
+   // These are offered records, not proof of visibility. Earlier committed chunks
+   // remain valid raw data on partial failure; only a complete ACK enables actions.
    const deadline=AbortSignal.timeout(1500);
    for(let start=0;start<records.length;start+=100){
     const part=records.slice(start,start+100),ack=await send('/internal/served',{records:part},undefined,deadline);

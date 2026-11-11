@@ -29,3 +29,8 @@ CREATE TABLE IF NOT EXISTS export_members (
  PRIMARY KEY(stream,record_id)
 );
 CREATE TABLE IF NOT EXISTS revoked_users(reader_id TEXT PRIMARY KEY,revoked_at TEXT NOT NULL);
+-- Retain object names after deleting originals/jobs: a disconnected uploader can
+-- finish a previously issued GCS request after the advisory lock has disappeared.
+CREATE TABLE IF NOT EXISTS deletion_targets (
+ reader_id TEXT NOT NULL REFERENCES revoked_users(reader_id), object_name TEXT PRIMARY KEY
+);

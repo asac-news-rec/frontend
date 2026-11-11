@@ -91,6 +91,10 @@ PostgreSQL `behavior_logging` 스키마에 served_records, action_records, expor
 
 이후 피드 요청의 reader_id가 수집 쿠키와 같은 경우에만 최종 응답의 served 저장을 시도합니다. 저장 ACK를 확인한 응답에는 collection_enabled=true, 세션 불일치·저장 장애에는 collection_enabled=false를 붙입니다. 뉴스 백엔드의 정상 응답은 두 경우 모두 화면에 반환합니다. 이 수집 문맥은 익명 뉴스 API 전체에 대한 계정 인증을 의미하지 않습니다.
 
+served는 화면에 제공하려던 후보 기록이며 실제 노출의 증거가 아닙니다. 100행씩 전송하므로 후속 배치 실패 시 앞서 커밋한 배치는 남습니다. 피드 전체를 원자적으로 커밋하거나 완료 표시를 저장하지 않습니다. 모든 배치 ACK를 받아야 해당 응답의 행동 수집을 켭니다. 새 피드 요청에는 백엔드가 새 request_id·impression_id를 발급하며, 동일 ID·동일 내용의 전송 재시도만 duplicate입니다. served에 대응하는 exposure가 없어도 미노출·비선호로 단정할 수 없습니다. 화면 표시 전 종료와 수집 손실도 구분되지 않으므로 분석에서는 미확인으로 취급합니다.
+
+pagehide에서 beacon 전송을 요청해도 ACK가 아니므로 큐를 제거하지 않습니다. fetch와 beacon이 겹치면 같은 불변 event_id·본문을 보내며 서버는 최초 커밋에 accepted, 동일 재전송에 duplicate를 반환합니다. pageshow에서 남은 큐를 재시도하고 accepted/duplicate ACK 후 제거합니다. 노출은 pagehide/visibilitychange에서 현재 구간을 한 번 종료하고 복귀 시 새 구간을 시작하므로, 보이지 않던 시간과 이전 구간을 합산하지 않습니다. 브라우저 테스트는 persisted=true 수명주기 이벤트를 직접 발생시켜 이 계약을 검사하며 실제 BFCache 채택 여부를 보장하지 않습니다.
+
 화면은 카드 50% 이상 표시·탭 visible·스크롤 정지 상태의 연속 구간을 exposure로 기록합니다. 구간 종료 시 전송하며 빠른 노출도 원본에 남깁니다. 클릭은 목록 링크 활성화 시 article_open, 좋아요/취소는 백엔드가 changed=true로 성공한 뒤에만 전송합니다. 조회·복원·실패는 좋아요 이벤트를 생성하지 않습니다. 상세 체류시간을 목록 노출에 합치지 않습니다.
 
 브라우저는 고정 event_id·내용으로 지수 재시도하며 탭 sessionStorage 큐를 새로고침 뒤 복원합니다. 401·403을 영구 입력 오류로 일괄 폐기하지 않습니다. SESSION_REQUIRED는 같은 canonical reader_id로 수집 세션을 복구한 뒤 원래 ID·본문을 재전송합니다. 동시 실패는 하나의 복구 요청을 공유하고 이미 복구한 뒤 도착한 이전 403은 중복 세션 발급을 만들지 않습니다. 복구에는 유효한 reader 증명이 필요하며 새 익명 ID를 만들지 않습니다. 증명이 없으면 30초간 세션 복구 재호출을 제한하고 기존 이벤트를 큐/TTL 범위 안에서 보류합니다. Origin·인증 설정 오류 등 다른 401·403도 보류·재시도하며 세션 재발급을 반복하지 않습니다. online/focus 또는 retryBehaviorEvents()로 재시도할 수 있습니다.
@@ -128,6 +132,8 @@ manifests/{job_id}.json
 작업은 stream·독자·5분 구간별 최대1000행입니다. DB 트랜잭션으로 job_id·구성원·객체명·내용·SHA-256을 고정합니다. GCS는 if_generation_match=0으로 새 객체만 생성합니다. 기존 객체가 있으면 동일 generation을 읽고 실제 내용 hash를 비교합니다. 다르면 덮어쓰지 않고 오류로 남깁니다. 객체와 manifest 성공 뒤에만 uploaded와 GCS generation receipt를 커밋합니다. 업로드 뒤 DB 갱신 전 종료해도 같은 객체를 확인해 복구합니다.
 
 업로드 실패는 DB attempts·next_attempt_at으로 지수 재시도합니다. worker는 매 cycle 연결을 새로 열어 DB 재시작 후에도 다시 시도합니다. API의 다음 수신도 끊긴 연결을 복구합니다. 작업 content와 DB 원본은 업로드 후에도 유지하므로 보관량 상한을 자동 해소하지 않습니다. 자동 보관·아카이브와 대량 성능 검증은 후속입니다.
+
+session advisory lock은 DB 연결이 살아 있는 동안만 유효합니다. worker는 외부 쓰기 전후와 상태 갱신 전에 같은 연결·미철회 작업을 확인하며, 연결을 잃은 export 안에서는 자동 재접속하지 않습니다. 삭제 시 객체·manifest 이름을 deletion_targets에 영구 기록하고, 다음 worker cycle마다 이 목록의 잔여 객체를 삭제합니다. 원본과 작업을 삭제한 뒤에도 철회 표시와 이 정리 목록은 유지합니다. 이미 시작한 GCS 요청은 DB 잠금 유실 후에도 완료될 수 있어 삭제 응답 후 파일이 일시적으로 다시 나타날 수 있습니다. 후속 정리가 성공해야 사라지며 worker 중단·삭제 권한 부족 동안은 남을 수 있습니다. 즉시 부활 방지를 보장하지 않으며 worker에 읽기·생성·삭제 권한이 필요합니다. PostgreSQL 연결 강제 종료 → 사용자 삭제 → 지연 업로드 완료 → 새 worker 정리 순서를 통합 시험합니다. 목록 전체 재검사의 비용 최적화는 후속입니다.
 
 ## 검증
 

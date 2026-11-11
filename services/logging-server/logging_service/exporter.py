@@ -51,17 +51,24 @@ class Exporter:
         with self.store.lock, (self.store.export_lock() if hasattr(self.store, "export_lock") else nullcontext(True)) as acquired:
             if not acquired:
                 return 0
+            if hasattr(self.store, "deletion_targets"):
+                for name in self.store.deletion_targets():
+                    self.sink.remove(name)
             self.store.prepare_exports()
             completed = 0
             for job in self.store.jobs(force):
                 try:
+                    self.check_lease(job)
                     receipt = self.sink.put(job["object_name"], job["content"])
+                    self.check_lease(job)
                     self.after_write(job)
+                    self.check_lease(job)
                     manifest = {key: job[key] for key in ("job_id", "object_name", "stream", "partition_path", "row_count", "content_hash")}
                     manifest.update(schema_version=1, prepared_at=job["created_at"])
                     if receipt:
                         manifest["storage"] = receipt
                     self.sink.put(f"manifests/{job['job_id']}.json", compact(manifest) + "\n")
+                    self.check_lease(job)
                     self.store.mark(job, receipt=receipt)
                     completed += 1
                     self.state.update(lastSuccess=iso(self.store.now()), lastError=None)
@@ -69,6 +76,10 @@ class Exporter:
                     self.store.mark(job, error)
                     self.state["lastError"] = type(error).__name__
             return completed
+
+    def check_lease(self, job):
+        if hasattr(self.store, "check_export_lease"):
+            self.store.check_export_lease(job)
 
     def delete(self, reader):
         with self.store.lock, (self.store.export_lock(wait=True) if hasattr(self.store, "export_lock") else nullcontext(True)):

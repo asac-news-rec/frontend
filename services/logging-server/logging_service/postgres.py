@@ -66,6 +66,7 @@ class PostgresStore(Store):
         self.url = url
         self.now = now or (lambda: int(time.time() * 1000))
         self.lock = threading.RLock()
+        self._export_connection = None
         self.connection = psycopg.connect(url, autocommit=True, row_factory=dict_row, connect_timeout=5)
         self.db = Database(self.connection)
         try:
@@ -87,6 +88,8 @@ class PostgresStore(Store):
     def transaction(self):
         with self.lock:
             if self.connection.closed or self.connection.broken:
+                if self._export_connection is not None:
+                    raise RuntimeError("EXPORT_LEASE_LOST")
                 self.connection = psycopg.connect(self.url, autocommit=True, row_factory=dict_row, connect_timeout=5)
                 self.connection.execute("SET search_path TO behavior_logging")
                 self.db = Database(self.connection)
@@ -101,6 +104,7 @@ class PostgresStore(Store):
             (force, self.now()))]
 
     def mark(self, job, error=None, receipt=None):
+        self.check_export_lease(job)
         if error is None:
             self.connection.execute("UPDATE export_jobs SET status='uploaded',last_error=NULL,attempts=attempts+1,storage_receipt=%s WHERE job_id=%s",
                                     (Jsonb(receipt), job["job_id"]))
@@ -117,11 +121,30 @@ class PostgresStore(Store):
             else:
                 acquired = self.connection.execute("SELECT pg_try_advisory_lock(%s) AS acquired", (EXPORT_LOCK,)).fetchone()["acquired"]
             try:
+                if acquired:
+                    self._export_connection = self.connection
                 yield acquired
             finally:
+                self._export_connection = None
                 if acquired:
-                    self.connection.execute("SELECT pg_advisory_unlock(%s)", (EXPORT_LOCK,))
+                    if not self.connection.closed and not self.connection.broken:
+                        self.connection.execute("SELECT pg_advisory_unlock(%s)", (EXPORT_LOCK,))
+
+    def check_export_lease(self, job):
+        if self._export_connection is not self.connection or self.connection.closed or self.connection.broken:
+            raise RuntimeError("EXPORT_LEASE_LOST")
+        active = self.connection.execute("SELECT 1 FROM export_jobs j WHERE job_id=%s AND NOT EXISTS "
+            "(SELECT 1 FROM revoked_users r WHERE r.reader_id=j.reader_id)", (job["job_id"],)).fetchone()
+        if not active:
+            raise RuntimeError("EXPORT_REVOKED")
+
+    def deletion_targets(self):
+        return [r["object_name"] for r in self.connection.execute("SELECT object_name FROM deletion_targets ORDER BY object_name")]
 
     def revoke(self, reader):
         with self.transaction():
-            return super().revoke(reader)
+            jobs = super().revoke(reader)
+            for job in jobs:
+                for name in (job["object_name"], f"manifests/{job['job_id']}.json"):
+                    self.connection.execute("INSERT INTO deletion_targets VALUES(%s,%s) ON CONFLICT DO NOTHING", (reader, name))
+            return jobs
