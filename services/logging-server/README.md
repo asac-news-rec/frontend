@@ -112,6 +112,8 @@ GCP의 정적 프런트엔드는 기존 Nginx를 유지합니다. 같은 출처 
 - POST /internal/served: `{records:[...]}`
 - POST /events: `{events:[...]}`와 검증된 x-news-reader, x-collection-enabled:true, x-news-source:browser|simulator
 - POST /internal/served-file: file(JSONL), request_id, expected_item_count multipart. 전체 검증·원자 커밋 후에만 200
+
+두 served 경로 모두 추천 메타데이터 `score`(유한 JSON 숫자 또는 fallback의 null), `model_version`(문자열 또는 null), `features_as_of`(시간대가 있는 ISO 8601 문자열 또는 null)를 선택적으로 받습니다. 기존 필드만 있는 레코드도 수락합니다. 전달된 값과 명시적 null은 원본 저장 JSON과 내보내기 JSONL에 보존합니다. 프록시는 기사별 점수를 전달하고, 모델 버전과 피처 기준 시각은 기사별 값이 없을 때 피드 공통 값을 사용합니다. 백엔드가 생략한 값은 생략합니다.
 - POST /internal/flush: PostgreSQL에서는 202로 외부 worker poll 방식을 알림. 즉시 실행은 worker --once --force
 - POST /internal/delete-user: `{reader_id:string}`. 철회 후 GCS 원본·manifest·DB 삭제. 읽기·삭제 권한 필요
 

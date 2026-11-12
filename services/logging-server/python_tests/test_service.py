@@ -106,6 +106,28 @@ def test_file_atomic_commit_duplicate_and_conflict(client):
     assert upload(client, [new]).status_code == 200
 
 
+def test_served_model_metadata_is_exported(client, config):
+    metadata = dict(score=0.42, model_version="ctr-v3", features_as_of="2026-01-01T00:00:00.123456Z")
+    ranked = record(**metadata)
+    fallback = {**ranked, "impression_id": "imp-2", "position": 2,
+                "score": None, "model_version": None, "features_as_of": None}
+    results = client.post("/internal/served", json={"records": [ranked]}).json()["results"]
+    assert results[0]["status"] == "accepted"
+    assert upload(client, [fallback]).json()["results"][0]["status"] == "accepted"
+    assert upload(client, [ranked]).json()["results"][0]["status"] == "duplicate"
+    for field, value, code in (("score", True, "INVALID_SCORE"),
+                               ("features_as_of", "2026-02-30T00:00:00Z", "INVALID_TIME"),
+                               ("extra", 0, "UNKNOWN_FIELD")):
+        results = client.post("/internal/served", json={"records": [{**ranked, field: value}]}).json()["results"]
+        assert results[0]["code"] == code
+    assert client.post("/internal/flush", json={}).status_code == 200
+    exported = {row["impression_id"]: row
+                for file in Path(config.export_dir).rglob("*.jsonl")
+                for row in map(json.loads, file.read_text(encoding="utf-8").splitlines())}
+    assert {key: exported["imp-1"][key] for key in metadata} == metadata
+    assert all(exported["imp-2"][key] is None for key in metadata)
+
+
 def test_capacity_batch_does_not_overfill(config):
     with TestClient(create_app(Settings(TOKEN, config.database, config.export_dir, 100, 1))) as client:
         client.headers["Authorization"] = f"Bearer {TOKEN}"

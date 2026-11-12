@@ -58,6 +58,8 @@ def records(now=None):
 def test_postgres_commit_ack_and_worker_receipt(database, sink):
     config = Settings(TOKEN, database_url=database, gcs_bucket=sink.bucket.name, gcs_project="local-integration", gcs_prefix=sink.prefix)
     row, event = records()
+    metadata = dict(score=0.42, model_version="ctr-v3", features_as_of="2026-01-01T00:00:00.123456Z")
+    row.update(metadata)
     with TestClient(create_app(config)) as client:
         client.headers["Authorization"] = f"Bearer {TOKEN}"
         assert client.post("/internal/served", json={"records": [row]}).json()["results"][0]["status"] == "accepted"
@@ -70,6 +72,9 @@ def test_postgres_commit_ack_and_worker_receipt(database, sink):
     assert Exporter(store, sink).flush(True) == 2
     jobs = store.db.execute("SELECT * FROM export_jobs").fetchall()
     assert all(j["status"] == "uploaded" and j["storage_receipt"]["generation"] for j in jobs)
+    served_job = next(job for job in jobs if job["stream"] == "served")
+    exported = json.loads(sink.bucket.blob(f"{sink.prefix}/{served_job['object_name']}").download_as_text())
+    assert {key: exported[key] for key in metadata} == metadata
     assert store.db.execute("SELECT count(*) FROM pg_partitioned_table WHERE partrelid IN (SELECT oid FROM pg_class WHERE relnamespace='behavior_logging'::regnamespace)").fetchone()[0] == 0
     store.close()
 

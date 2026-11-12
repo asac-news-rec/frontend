@@ -35,9 +35,19 @@ export function createBehaviorBridge(origin:string,backendUrl:string|undefined,c
    if(!config)return;
    const session=current(req)??current(req,'news_reader'),body=input as {reader_id?:string};
    if(!session||body.reader_id!==session.readerId)return false;
-   const feed=payload as {request_id:string;served_at:string;reader_id?:string;items:{article_id:string;impression_id:string;position:number}[]};
+   type ModelMetadata={model_version?:unknown;features_as_of?:unknown};
+   const feed=payload as ModelMetadata & {
+    request_id:string;served_at:string;reader_id?:string;
+    items:(ModelMetadata & {article_id:string;impression_id:string;position:number;score?:unknown})[];
+   };
    if(feed.reader_id!==undefined&&feed.reader_id!==session.readerId)return false;
-   const records=feed.items.map(item=>({request_id:feed.request_id,served_at:feed.served_at,reader_id:session.readerId,article_id:item.article_id,impression_id:item.impression_id,position:item.position}));
+   const records=feed.items.map(item=>({
+    request_id:feed.request_id,served_at:feed.served_at,reader_id:session.readerId,
+    article_id:item.article_id,impression_id:item.impression_id,position:item.position,
+    score:item.score,
+    model_version:item.model_version===undefined?feed.model_version:item.model_version,
+    features_as_of:item.features_as_of===undefined?feed.features_as_of:item.features_as_of
+   }));
    // These are offered records, not proof of visibility. Earlier committed chunks
    // remain valid raw data on partial failure; only a complete ACK enables actions.
    const deadline=AbortSignal.timeout(1500);
