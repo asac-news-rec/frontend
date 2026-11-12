@@ -8,6 +8,8 @@
 
 ## 배포 파일
 
+GitHub Actions의 `Frontend CI`는 `main` 대상 PR과 `main`에 반영된 커밋에서 설치·검사·테스트·빌드를 실행합니다. `main` 빌드가 성공하면 Actions 실행 페이지에서 `frontend-dist-<커밋 SHA>` 결과물을 내려받을 수 있습니다. 결과물 보관 이후 실제 배포는 배포 환경의 절차를 따릅니다.
+
 1. 프론트에서 `npm ci`, `npm run check`, `npm test`, `npm run build`를 실행합니다.
 2. 배포 담당자가 기존 백엔드 `web/` 화면을 백업합니다.
 3. `dist/` 안의 `index.html`과 `src/` 디렉토리를 백엔드 `web/` 안에 배치합니다. 결과는 `web/index.html`, `web/src/app.js`, `web/src/style.css`입니다. `web/dist/`로 복사하지 않습니다.
