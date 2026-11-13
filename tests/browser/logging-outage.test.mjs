@@ -23,10 +23,11 @@ test('logging failures disable collection while feed, detail, pagination and lik
   if(req.url==='/api/user/anonymous')payload={reader_id:`019a0000-0000-7000-8000-${String(++reader).padStart(12,'0')}`};
   else if(req.url==='/api/category')payload={category_list:['IT·과학']};
   else if(req.url==='/api/news/feed'){
-   feeds.push(body);const offset=body.offset;
-   payload={request_id:randomUUID(),served_at:new Date().toISOString(),next_offset:offset===0?1:null,items:[{article_id:`a${offset}`,impression_id:randomUUID(),position:offset+1,title:`장애 중에도 읽는 기사 ${offset}`,paragraphs:['정상 뉴스 본문'],category:'IT·과학',published_at:new Date().toISOString(),is_synthetic:false,is_liked:false}]};
-  }else if(req.url?.endsWith('/like')){likes.push(body);payload={article_id:req.url.split('/')[3],is_liked:req.method==='PUT',changed:true};}
+   feeds.push({...body,reader_id:req.headers.cookie?.split('=')[1]});const offset=body.cursor?.returned_count??0;
+   payload={request_id:randomUUID(),served_at:new Date().toISOString(),next_cursor:offset===0?{published_at:new Date().toISOString(),article_id:'a0',returned_count:1}:null,items:[{article_id:`a${offset}`,impression_id:randomUUID(),position:offset+1,title:`장애 중에도 읽는 기사 ${offset}`,paragraphs:['정상 뉴스 본문'],category:'IT·과학',published_at:new Date().toISOString(),is_synthetic:false,is_liked:false}]};
+  }else if(req.url?.endsWith('/like')){likes.push({reader_id:req.headers.cookie?.split('=')[1]});payload={article_id:req.url.split('/')[3],is_liked:req.method==='PUT',changed:true};}
   else{res.writeHead(404);res.end();return;}
+  if(req.url==='/api/user/anonymous')res.setHeader('Set-Cookie',`news_reader=${payload.reader_id}; Path=/; HttpOnly`);
   res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify(payload));
  }));
  const reservation=createServer();reservation.listen(0,'127.0.0.1');await once(reservation,'listening');const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
@@ -46,7 +47,7 @@ test('logging failures disable collection while feed, detail, pagination and lik
    await page.locator('article .like-button').click();await page.waitForFunction(()=>document.querySelector('article .like-button')?.getAttribute('aria-pressed')==='true');
    assert.equal(likes.length,firstLike+1);assert.equal(likes.at(-1).reader_id,feeds[firstFeed].reader_id);
    await page.locator('article .back').first().click();await page.locator('a.card[data-article="a1"]').waitFor();
-   assert(feeds.slice(firstFeed).some(body=>body.offset===1));
+   assert(feeds.slice(firstFeed).some(body=>body.cursor?.returned_count===1));
    assert(feeds.slice(firstFeed).every(body=>body.reader_id===feeds[firstFeed].reader_id));
    assert.equal(eventRequests,beforeEvents);
    assert.equal(await page.evaluate(()=>JSON.parse(sessionStorage.getItem('sai-news.behavior-pending')??'{"entries":[]}').entries.length),0);

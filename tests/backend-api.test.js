@@ -6,35 +6,25 @@ const readerId='019a4c00-0000-7000-8000-000000000001';
 const article=(position,id)=>({article_id:id,impression_id:`imp-${position}`,position,title:`기사 ${position}`,
  paragraphs:['본문'],category:'사회',published_at:'2026-11-04T01:30:00+00:00',is_synthetic:true,is_liked:position===1});
 
-test('기존 브라우저 UUID7은 새 reader_id 저장 키로 옮겨 재사용한다',async()=>{
- const values=new Map([['sai-news.backend-user-id',readerId]]);
- const storage={getItem:key=>values.get(key)??null,setItem:(key,value)=>values.set(key,value)};
- const fetchImpl=async()=>{throw new Error('ID 재발급 금지');};
- assert.equal(await getBackendReaderId({storage,fetchImpl}),readerId);
- assert.equal(values.get('sai-news.backend-reader-id'),readerId);
-});
+const cursor={published_at:'2026-11-04T01:30:00Z',article_id:'a2',returned_count:2};
 
-test('백엔드 ID를 한 번 발급받고 다음 목록에 숫자 offset을 보낸다',async()=>{
- const values=new Map(),calls=[];
- const storage={getItem:key=>values.get(key)??null,setItem:(key,value)=>values.set(key,value)};
+test('first feed bootstraps once and passes the backend cursor back unchanged',async()=>{
+ const calls=[];
  const fetchImpl=async(url,options)=>{
-  calls.push({url,method:options.method,body:options.body&&JSON.parse(options.body)});
-  if(url.endsWith('/api/user/anonymous'))return {ok:true,json:async()=>({reader_id:readerId})};
-  const offset=JSON.parse(options.body).offset;
-  return {ok:true,json:async()=>({request_id:`req-${offset}`,served_at:'2026-11-04T01:30:00Z',
-   items:offset===0?[article(1,'a1'),article(2,'a2')]:[article(3,'a3')],next_offset:offset===0?2:null})};
+  const body=options.body&&JSON.parse(options.body);
+  calls.push([url,body]);
+  if(url.endsWith('/api/user/anonymous'))return Response.json({reader_id:readerId});
+  return Response.json({request_id:'req',served_at:cursor.published_at,
+   items:body.cursor?[article(3,'a3')]:[article(1,'a1'),article(2,'a2')],
+   next_cursor:body.cursor?null:cursor});
  };
- const getReaderId=()=>getBackendReaderId({storage,fetchImpl});
- const first=await getBackendPage(0,{fetchImpl,getReaderId});
- const second=await getBackendPage(first.nextOffset,{fetchImpl,getReaderId});
- assert.equal(await getReaderId(),readerId);
- assert.deepEqual(calls.map(call=>[call.url,call.body]),[
-  ['/api/user/anonymous',undefined],
-  ['/api/news/feed',{reader_id:readerId,offset:0}],
-  ['/api/news/feed',{reader_id:readerId,offset:2}]]);
+ const getReaderId=()=>getBackendReaderId({fetchImpl});
+ const first=await getBackendPage(null,{fetchImpl,getReaderId});
+ const second=await getBackendPage(first.nextCursor,{fetchImpl,getReaderId});
+ assert.deepEqual(calls,[['/api/user/anonymous',undefined],['/api/news/feed',{}],['/api/news/feed',{cursor}]]);
  assert.deepEqual([...first.items,...second.items].map(item=>item.rank),[1,2,3]);
  assert.deepEqual(first.items.map(item=>item.isLiked),[true,false]);
- assert.equal(second.nextOffset,null);
+ assert.equal(second.nextCursor,null);
 });
 
 test('카테고리·소분류와 동일 필터의 다음 페이지를 요청한다',async()=>{
@@ -42,41 +32,41 @@ test('카테고리·소분류와 동일 필터의 다음 페이지를 요청한�
  const fetchImpl=async(url,options)=>{
   calls.push({url,body:options.body&&JSON.parse(options.body)});
   const payload=url.endsWith('/api/category')?{category_list:['정치']}:url.endsWith('/api/subcategory')?{sub_category_list:['국회']}:
-   {request_id:'req',served_at:'2026-11-04T01:30:00Z',items:[article(1,'a1')],next_offset:20};
+   {request_id:'req',served_at:'2026-11-04T01:30:00Z',items:[article(1,'a1')],next_cursor:cursor};
   return {ok:true,json:async()=>payload};
  };
  assert.deepEqual(await getBackendCategories({fetchImpl}),['정치']);
  assert.deepEqual(await getBackendSubcategories('정치',{fetchImpl}),['국회']);
  const filters={category:'정치',subcategory:'국회'};
- const first=await getBackendPage(0,{fetchImpl,getReaderId:async()=>readerId,filters});
- await getBackendPage(first.nextOffset,{fetchImpl,getReaderId:async()=>readerId,filters});
+ const first=await getBackendPage(null,{fetchImpl,getReaderId:async()=>readerId,filters});
+ await getBackendPage(first.nextCursor,{fetchImpl,getReaderId:async()=>readerId,filters});
  assert.deepEqual(calls.map(({url,body})=>[url,body]),[
   ['/api/category',undefined],
   ['/api/subcategory',{category:'정치'}],
-  ['/api/news/feed',{reader_id:readerId,offset:0,...filters}],
-  ['/api/news/feed',{reader_id:readerId,offset:20,...filters}]]);
+  ['/api/news/feed',filters],
+  ['/api/news/feed',{cursor,...filters}]]);
 });
 
-test('좋아요는 PUT·DELETE 본문에 reader_id만 보낸다',async()=>{
+test('좋아요는 PUT·DELETE 요청 본문을 생략한다',async()=>{
  const calls=[];
- const fetchImpl=async(url,options)=>{calls.push({url,method:options.method,body:JSON.parse(options.body)});
+ const fetchImpl=async(url,options)=>{calls.push({url,method:options.method,body:options.body});
   return {ok:true,json:async()=>({article_id:'a1',is_liked:options.method==='PUT',changed:true})};};
  const change=(article,liked)=>changeBackendLike(article,liked,{fetchImpl,getReaderId:async()=>readerId});
  assert.deepEqual(await change('a1',true),{article_id:'a1',is_liked:true,changed:true});
  assert.deepEqual(await change('a1',false),{article_id:'a1',is_liked:false,changed:true});
  assert.deepEqual(calls,[
-  {url:'/api/news/a1/like',method:'PUT',body:{reader_id:readerId}},
-  {url:'/api/news/a1/like',method:'DELETE',body:{reader_id:readerId}}]);
+  {url:'/api/news/a1/like',method:'PUT',body:undefined},
+  {url:'/api/news/a1/like',method:'DELETE',body:undefined}]);
 });
 
 test('잘못된 기사 응답과 좋아요 응답을 적용하지 않는다',async()=>{
- const feed=async()=>({ok:true,json:async()=>({request_id:'r',served_at:'2026-11-04T01:30:00Z',items:[{...article(1,'a1'),is_liked:null}],next_offset:null})});
- await assert.rejects(getBackendPage(0,{fetchImpl:feed,getReaderId:async()=>readerId}),/INVALID_BACKEND_ARTICLE/);
+ const feed=async()=>({ok:true,json:async()=>({request_id:'r',served_at:'2026-11-04T01:30:00Z',items:[{...article(1,'a1'),is_liked:null}],next_cursor:null})});
+ await assert.rejects(getBackendPage(null,{fetchImpl:feed,getReaderId:async()=>readerId}),/INVALID_BACKEND_ARTICLE/);
  const like=async()=>({ok:true,json:async()=>({article_id:'a1',is_liked:true})});
  await assert.rejects(changeBackendLike('a1',true,{fetchImpl:like,getReaderId:async()=>readerId}),/INVALID_BACKEND_LIKE/);
 });
 
 test('피드 응답에 reader_id가 있으면 요청 독자와 일치해야 한다',async()=>{
- const feed=async()=>({ok:true,json:async()=>({reader_id:'other-reader',request_id:'r',served_at:'2026-11-04T01:30:00Z',items:[],next_offset:null})});
- await assert.rejects(getBackendPage(0,{fetchImpl:feed,getReaderId:async()=>readerId}),/INVALID_BACKEND_FEED/);
+ const feed=async()=>({ok:true,json:async()=>({reader_id:'other-reader',request_id:'r',served_at:'2026-11-04T01:30:00Z',items:[],next_cursor:null})});
+ await assert.rejects(getBackendPage(null,{fetchImpl:feed,getReaderId:async()=>readerId}),/INVALID_BACKEND_FEED/);
 });

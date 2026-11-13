@@ -1,9 +1,9 @@
 import {randomUUID,timingSafeEqual} from 'node:crypto';
 import type {IncomingMessage,ServerResponse} from 'node:http';
-import type {FeedRejection} from './backend-proxy.js';
+import {newsReaderCookie,type FeedRejection} from './backend-proxy.js';
 
 export interface SyntheticConfig {agentToken:string;loggingToken:string;loggingUrl:string}
-interface Session {expires:number;readerId?:string}
+interface Session {expires:number;readerId?:string;readerCookie?:string}
 // Local opt-in bridge. Secrets stay on the Node server, never in browser scripts.
 export function createSyntheticBridge(origin:string,config?:SyntheticConfig){
  if(config&&(config.agentToken.length<24||config.loggingToken.length<24))throw new Error('SYNTHETIC_TOKENS_MIN_24_CHARS');
@@ -22,13 +22,20 @@ export function createSyntheticBridge(origin:string,config?:SyntheticConfig){
   return ack;
  };
  return {
-  async onFeed(req:IncomingMessage,input:unknown,payload:unknown):Promise<void|FeedRejection>{
+  onReaderIssued(req:IncomingMessage,payload:unknown,readerCookie:string|undefined){
+   const current=session(req);
+   const reader=(payload as {reader_id?:unknown})?.reader_id;
+   if(current&&readerCookie&&typeof reader==='string'){
+    current.readerId=reader;
+    current.readerCookie=readerCookie;
+   }
+  },
+  async onFeed(req:IncomingMessage,payload:unknown):Promise<void|FeedRejection>{
    const current=session(req);if(!config||!current)return;
-   const body=input as {reader_id:string};
+   const readerId=current.readerId;
    const feed=payload as {reader_id?:string;request_id:string;served_at:string;items:{article_id:string;impression_id:string;position:number}[]};
-   if(typeof body?.reader_id!=='string'||(current.readerId&&current.readerId!==body.reader_id)||(feed.reader_id!==undefined&&feed.reader_id!==body.reader_id))return {status:409,error:'SYNTHETIC_READER_MISMATCH'};
-   current.readerId=body.reader_id;
-   const records=feed.items.map(item=>({request_id:feed.request_id,served_at:feed.served_at,reader_id:body.reader_id,article_id:item.article_id,impression_id:item.impression_id,position:item.position}));
+   if(!readerId||current.readerCookie!==newsReaderCookie(req.headers.cookie)||(feed.reader_id!==undefined&&feed.reader_id!==readerId))return {status:409,error:'SYNTHETIC_READER_MISMATCH'};
+   const records=feed.items.map(item=>({request_id:feed.request_id,served_at:feed.served_at,reader_id:readerId,article_id:item.article_id,impression_id:item.impression_id,position:item.position}));
    // Served is committed before the browser sees the list, including paginated lists.
    try{
     for(let start=0;start<records.length;start+=100)await send('/internal/served',{records:records.slice(start,start+100)});
@@ -53,7 +60,7 @@ export function createSyntheticBridge(origin:string,config?:SyntheticConfig){
    if(pathname==='/api/synthetic/status'&&req.method==='GET')return reply(200,{enabled:Boolean(current)});
    if(pathname!=='/api/synthetic/events')return reply(404,{error:'NOT_FOUND'});
    if(req.method!=='POST')return reply(405,{error:'METHOD_NOT_ALLOWED'});
-   if(req.headers.origin!==origin||!current?.readerId)return reply(403,{error:'SESSION_REQUIRED'});
+   if(req.headers.origin!==origin||!current?.readerId||current.readerCookie!==newsReaderCookie(req.headers.cookie))return reply(403,{error:'SESSION_REQUIRED'});
    if(req.headers['content-type']?.split(';')[0]!=='application/json')return reply(415,{error:'JSON_REQUIRED'});
    const chunks:Buffer[]=[];let size=0;
    for await(const chunk of req){size+=chunk.length;if(size>262144)return reply(413,{error:'BODY_TOO_LARGE'});chunks.push(chunk);}
