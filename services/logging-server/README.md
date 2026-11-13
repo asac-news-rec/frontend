@@ -51,7 +51,11 @@ source는 신뢰한 호출자의 x-news-source(browser 또는 simulator, 기본 
 
 기존 ACK `{results:[{event_id,status,code?}]}`를 유지합니다. served 응답의 키는 impression_id입니다. accepted는 SQLite 커밋, duplicate는 동일 ID·내용·행동 source의 기존 수락입니다. GCS나 분석 처리 완료가 아닙니다. rejected는 영구 입력 오류, retryable/IMPRESSION_NOT_READY는 제공 기록 도착 후 같은 내용으로 재시도할 수 있습니다.
 
+커밋 직후 내보내기 알림이 실패하면 경고를 기록하고 주기 실행에서 저장된 행을 처리합니다. 제공 기록이 없어도 독자가 철회되면 철회 검사가 먼저 실행되어 403 USER_REVOKED를 반환합니다. 이 응답을 받은 호출자는 같은 독자의 전송을 중단합니다.
+
 JSON은 envelope 단위 오류 시 400, 개별 원본 오류 시 결과별 rejected입니다. JSON/MIME/본문 상한 오류는 400/415/413, 인증은 401, 수집 불허·철회는 403, 저장 장애·보관량 초과는 503입니다. 본문 전체 상한은 256KiB(파일 업로드의 multipart overhead 포함), 배치 1~100행, 행동 1건 최대 4KiB입니다. FastAPI validation 오류는 기존 계약에 맞게 400으로 반환하며 입력 원문은 오류 응답에 포함하지 않습니다. 자동 보관 정리와 요청률 기반 429는 아직 없습니다.
+
+POST 본문은 HTTP 헤더를 받은 뒤 15초 안에 읽습니다. 초과하면 408 BODY_TIMEOUT을 반환합니다. 헤더 수신 제한은 배포 프록시에서 설정합니다.
 
 ## 백엔드 JSONL 파일 업로드
 

@@ -1,7 +1,11 @@
+import logging
 import os
 from pathlib import Path
+from threading import Lock
 
 from .schema import compact, digest, iso
+
+logger = logging.getLogger(__name__)
 
 
 class LocalSink:
@@ -44,30 +48,45 @@ class LocalSink:
 class Exporter:
     def __init__(self, store, sink, after_write=lambda job: None):
         self.store, self.sink, self.after_write = store, sink, after_write
+        self.io_lock = Lock()
         self.state = {"lastSuccess": None, "lastError": None}
 
     def flush(self, force=False):
-        with self.store.lock:
-            self.store.prepare_exports()
+        with self.io_lock:
+            with self.store.lock:
+                self.store.prepare_exports()
+                jobs = self.store.jobs(force)
             completed = 0
-            for job in self.store.jobs(force):
+            last_error = None
+            for job in jobs:
                 try:
                     self.sink.put(job["object_name"], job["content"])
                     self.after_write(job)
                     manifest = {key: job[key] for key in ("job_id", "object_name", "stream", "partition_path", "row_count", "content_hash")}
                     manifest.update(schema_version=1, prepared_at=job["created_at"])
                     self.sink.put(f"manifests/{job['job_id']}.json", compact(manifest) + "\n")
-                    self.store.mark(job)
+                    with self.store.lock:
+                        self.store.mark(job)
                     completed += 1
-                    self.state.update(lastSuccess=iso(self.store.now()), lastError=None)
+                    self.state["lastSuccess"] = iso(self.store.now())
                 except Exception as error:
-                    self.store.mark(job, error)
-                    self.state["lastError"] = type(error).__name__
+                    last_error = type(error).__name__
+                    self.state["lastError"] = last_error
+                    try:
+                        with self.store.lock:
+                            self.store.mark(job, error)
+                    except Exception as mark_error:
+                        last_error = f"{last_error}; mark: {type(mark_error).__name__}"
+                        self.state["lastError"] = last_error
+                        logger.error("Failed to record export job %s: %s", job["job_id"], type(mark_error).__name__)
+            self.state["lastError"] = last_error
             return completed
 
     def delete(self, reader):
-        with self.store.lock:
-            for job in self.store.revoke(reader):
+        with self.io_lock:
+            with self.store.lock:
+                jobs = self.store.revoke(reader)
+            for job in jobs:
                 self.sink.remove(job["object_name"])
                 self.sink.remove(f"manifests/{job['job_id']}.json")
             self.store.finish_deletion(reader)

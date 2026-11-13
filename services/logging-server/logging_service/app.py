@@ -21,6 +21,7 @@ from .store import Store
 
 ROOT = Path(__file__).resolve().parents[1]
 MAX_BODY = 262144
+BODY_TIMEOUT_SECONDS = 15
 logger = logging.getLogger(__name__)
 
 
@@ -101,16 +102,24 @@ class BodyLimit:
             return await self.app(scope, receive, send)
         # Bound the actual streamed body, including multipart overhead, before parsing.
         chunks, total = [], 0
-        while True:
-            message = await receive()
-            if message["type"] == "http.disconnect":
-                return
-            total += len(message.get("body", b""))
-            if total > MAX_BODY:
-                return await JSONResponse({"error": "BODY_TOO_LARGE"}, status_code=413)(scope, receive, send)
-            chunks.append(message)
-            if not message.get("more_body", False):
-                break
+        try:
+            async with asyncio.timeout(BODY_TIMEOUT_SECONDS):
+                while True:
+                    message = await receive()
+                    if message["type"] == "http.disconnect":
+                        return
+                    total += len(message.get("body", b""))
+                    if total > MAX_BODY:
+                        break
+                    chunks.append(message)
+                    if not message.get("more_body", False):
+                        break
+        except TimeoutError:
+            response = JSONResponse({"error": "BODY_TIMEOUT"}, status_code=408)
+            return await response(scope, receive, send)
+        if total > MAX_BODY:
+            response = JSONResponse({"error": "BODY_TOO_LARGE"}, status_code=413)
+            return await response(scope, receive, send)
         iterator = iter(chunks)
 
         async def replay():
@@ -214,9 +223,13 @@ def create_app(settings=None):
     json_protected = [Depends(authenticate), Depends(json_type)]
 
     def notify_export(request):
-        with request.app.state.store.lock:
-            if request.app.state.store.readiness()["pendingRecords"] >= 1000:
-                request.app.state.loop.call_soon_threadsafe(request.app.state.wake.set)
+        try:
+            with request.app.state.store.lock:
+                if request.app.state.store.readiness()["pendingRecords"] >= 1000:
+                    request.app.state.loop.call_soon_threadsafe(request.app.state.wake.set)
+        except Exception as error:
+            # The intake transaction has committed. Periodic export can pick up the rows.
+            logger.warning("Could not signal export after intake: %s", type(error).__name__)
 
     @app.get("/ready", dependencies=protected)
     def ready(request: Request):
