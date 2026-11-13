@@ -118,6 +118,34 @@ def test_conflict_never_overwrites_and_failed_upload_stays_pending(database, sin
     store.close()
 
 
+def test_retention_preserves_failed_exports_and_gcs_deletion_metadata(database, sink):
+    now = int(time.time() * 1000)
+    store = PostgresStore(database, now=lambda: now)
+    row, event = records(now)
+    store.intake_served({"records": [row]})
+    store.intake_actions({"events": [event]}, "reader", True)
+    store.prepare_exports()
+    action_job = next(job for job in store.jobs(True) if job["stream"] == "actions")
+    sink.put(action_job["object_name"], "different content")
+    exporter = Exporter(store, sink)
+    assert exporter.flush(True) == 1
+    now += 24 * 60 * 60 * 1000 + 1
+    assert store.prune_exported_records() == {"actions": 0, "served": 0}
+    assert store.counts() == {"actions": 1, "served": 1}
+    assert store.jobs(True)[0]["job_id"] == action_job["job_id"]
+
+    sink.remove(action_job["object_name"])
+    assert exporter.flush(True) == 1
+    assert store.prune_exported_records() == {"actions": 1, "served": 1}
+    assert store.prune_exported_records() == {"actions": 0, "served": 0}
+    assert store.counts() == {"actions": 0, "served": 0}
+    assert store.db.execute("SELECT count(*) FROM export_jobs WHERE content=''").fetchone()[0] == 2
+    assert len(list(sink.client.list_blobs(sink.bucket, prefix=sink.prefix))) == 4
+    exporter.delete("reader")
+    assert not list(sink.client.list_blobs(sink.bucket, prefix=sink.prefix))
+    store.close()
+
+
 def test_multiple_api_connections_and_worker_lock(database, sink):
     store = PostgresStore(database)
     row, event = records()

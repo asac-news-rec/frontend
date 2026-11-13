@@ -42,7 +42,16 @@ def behavior_export():
             end = context.get("data_interval_end")
         export_interval(start, end)
 
+    @task(retries=3, retry_delay=timedelta(minutes=1), do_xcom_push=False)
+    def prune_postgresql():
+        from contextlib import closing
+        from logging_service.postgres import PostgresStore
+
+        with closing(PostgresStore(os.environ["LOGGING_DATABASE_URL"])) as store:
+            print(f"Pruned exported records: {store.prune_exported_records()}")
+
     upload()
+    prune_postgresql()
 
 
 export_behavior_logs = behavior_export()

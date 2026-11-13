@@ -75,6 +75,8 @@ Airflow 2.10 또는 3의 DAG 폴더에 `dags/export_behavior_logs.py`를 배포�
 
 API는 PostgreSQL 커밋 후 ACK합니다. Airflow 태스크는 GCS 업로드 중 수신 트랜잭션 잠금을 잡지 않습니다.
 
+같은 DAG의 `prune_postgresql` 태스크는 업로드 태스크와 별도로 실행합니다. 수신 시각과 발생 시각 모두 24시간이 지난 행 중 GCS 업로드 및 manifest 저장이 완료되고 generation이 기록된 행만 PostgreSQL에서 정리합니다. 미배정·실패·재시도 대기 행은 24시간이 지나도 보존합니다. 남은 행동이 참조하는 served 행도 유지합니다. 정리는 DAG 실행 시점에 수행하므로 실제 보관 시간은 실행 간격과 업로드 상태에 따라 24시간을 넘을 수 있습니다. 업로드한 작업의 원본이 모두 정리되면 DB의 작업 본문도 비우고, GCS 사용자 삭제에 필요한 객체명과 업로드 영수증을 남깁니다.
+
 PostgreSQL `behavior_logging` 스키마에 served_records, action_records, export_jobs, export_members, revoked_users와 스키마 버전을 만듭니다. DB 사용자는 이 스키마를 생성할 권한이 필요합니다. 뉴스 테이블을 수정하지 않습니다. 초기 구현은 수신·용량·철회 판정을 짧은 트랜잭션 advisory lock으로 직렬화합니다. Airflow 태스크는 별도 session advisory lock으로 한 번에 하나만 export하며, 프로세스 종료 시 PostgreSQL이 잠금을 해제합니다. 부하 증가 시 수신 lock·전체 count·준비 작업량 최적화가 필요합니다.
 
 ## 같은 출처 프록시와 독자 문맥
@@ -131,7 +133,7 @@ manifests/{job_id}.json
 
 작업은 stream·독자·DAG 실행 구간별 최대1000행입니다. DB 트랜잭션으로 job_id·구성원·객체명·내용·SHA-256을 고정합니다. GCS는 if_generation_match=0으로 새 객체만 생성합니다. 기존 객체가 있으면 동일 generation을 읽고 실제 내용 hash를 비교합니다. 다르면 덮어쓰지 않고 오류로 남깁니다. 객체와 manifest 성공 뒤에만 uploaded와 GCS generation receipt를 커밋합니다. 업로드 뒤 DB 갱신 전 종료해도 같은 객체를 확인해 복구합니다.
 
-업로드 실패는 Airflow 태스크를 실패 처리합니다. 재시도마다 DB 연결을 새로 열어 해당 구간의 미완료 작업만 처리합니다. API의 다음 수신도 끊긴 연결을 복구합니다. 작업 content와 DB 원본은 업로드 후에도 유지하므로 보관량 상한을 자동 해소하지 않습니다. 자동 보관·아카이브와 대량 성능 검증은 후속입니다.
+업로드 실패는 Airflow 태스크를 실패 처리합니다. 재시도마다 DB 연결을 새로 열어 해당 구간의 미완료 작업만 처리합니다. API의 다음 수신도 끊긴 연결을 복구합니다. 미내보내기 행은 보관량 상한을 계속 사용하므로 장기간 실패한 구간은 Airflow에서 복구해야 합니다. 대량 성능 검증은 후속입니다.
 
 session advisory lock은 DB 연결이 살아 있는 동안만 유효합니다. Airflow 태스크는 외부 쓰기 전후와 상태 갱신 전에 같은 연결·미철회 작업을 확인하며, 연결을 잃은 export 안에서는 자동 재접속하지 않습니다. 삭제 시 객체·manifest 이름을 deletion_targets에 영구 기록하고, 다음 DAG 실행마다 이 목록의 잔여 객체를 삭제합니다. 원본과 작업을 삭제한 뒤에도 철회 표시와 이 정리 목록은 유지합니다. 이미 시작한 GCS 요청은 DB 잠금 유실 후에도 완료될 수 있어 삭제 응답 후 파일이 일시적으로 다시 나타날 수 있습니다. 후속 정리가 성공해야 사라지며 DAG 중단·삭제 권한 부족 동안은 남을 수 있습니다. 즉시 부활 방지를 보장하지 않으며 Airflow 태스크에 읽기·생성·삭제 권한이 필요합니다. PostgreSQL 연결 강제 종료 → 사용자 삭제 → 지연 업로드 완료 → 후속 내보내기 정리 순서를 통합 시험합니다. 목록 전체 재검사의 비용 최적화는 후속입니다.
 

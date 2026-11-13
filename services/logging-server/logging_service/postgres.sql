@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS export_members (
  PRIMARY KEY(stream,record_id)
 );
 CREATE TABLE IF NOT EXISTS revoked_users(reader_id TEXT PRIMARY KEY,revoked_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS export_members_job ON export_members(job_id);
 -- Retain object names after deleting originals/jobs: a disconnected uploader can
 -- finish a previously issued GCS request after the advisory lock has disappeared.
 CREATE TABLE IF NOT EXISTS deletion_targets (

@@ -13,6 +13,7 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
+from .schema import iso
 from .store import Store
 
 INTAKE_LOCK = 2700101
@@ -96,6 +97,42 @@ class PostgresStore(Store):
             with self.connection.transaction():
                 self.connection.execute("SELECT pg_advisory_xact_lock(%s)", (INTAKE_LOCK,))
                 yield
+
+    def prune_exported_records(self):
+        cutoff = iso(self.now() - 24 * 60 * 60 * 1000)
+        with self.export_lock(wait=True), self.transaction():
+            counts = {}
+            # Served rows are still needed to join and authorize remaining actions.
+            streams = (
+                ("actions", "action_records", "event_id", "event_time", ""),
+                ("served", "served_records", "impression_id", "served_at",
+                 "AND NOT EXISTS (SELECT 1 FROM action_records a WHERE a.impression_id=r.impression_id)"),
+            )
+            for stream, table, key, occurred_at, dependency in streams:
+                result = self.connection.execute(f"""
+                    WITH removed AS (
+                        DELETE FROM {table} r
+                        WHERE r.received_at < %s AND r.{occurred_at} < %s
+                        AND EXISTS (
+                            SELECT 1 FROM export_members m JOIN export_jobs j USING (job_id)
+                            WHERE m.stream=%s AND m.record_id=r.{key}
+                            AND j.status='uploaded' AND j.storage_receipt->>'generation' IS NOT NULL
+                        )
+                        {dependency}
+                        RETURNING r.{key}
+                    )
+                    DELETE FROM export_members m USING removed r
+                    WHERE m.stream=%s AND m.record_id=r.{key}
+                    """, (cutoff, cutoff, stream, stream))
+                counts[stream] = result.rowcount
+            # Keep object names and receipts so delete-user can still remove GCS objects.
+            self.connection.execute("""
+                UPDATE export_jobs j SET content=''
+                WHERE j.status='uploaded' AND j.content<>''
+                AND j.storage_receipt->>'generation' IS NOT NULL
+                AND NOT EXISTS (SELECT 1 FROM export_members m WHERE m.job_id=j.job_id)
+                """)
+            return counts
 
     def jobs(self, force=False, interval_path=None):
         return [dict(row) for row in self.connection.execute(
