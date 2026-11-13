@@ -47,16 +47,18 @@ class Exporter:
         self.store, self.sink, self.after_write = store, sink, after_write
         self.state = {"lastSuccess": None, "lastError": None}
 
-    def flush(self, force=False):
-        with self.store.lock, (self.store.export_lock() if hasattr(self.store, "export_lock") else nullcontext(True)) as acquired:
+    def flush(self, force=False, *, interval=None, interval_path=None):
+        lock = self.store.export_lock(wait=interval is not None) if hasattr(self.store, "export_lock") else nullcontext(True)
+        with self.store.lock, lock as acquired:
             if not acquired:
                 return 0
             if hasattr(self.store, "deletion_targets"):
                 for name in self.store.deletion_targets():
                     self.sink.remove(name)
-            self.store.prepare_exports()
+            self.store.prepare_exports(interval, interval_path)
             completed = 0
-            for job in self.store.jobs(force):
+            jobs = self.store.jobs(force, interval_path) if interval_path else self.store.jobs(force)
+            for job in jobs:
                 try:
                     self.check_lease(job)
                     receipt = self.sink.put(job["object_name"], job["content"])
@@ -75,6 +77,8 @@ class Exporter:
                 except Exception as error:
                     self.store.mark(job, error)
                     self.state["lastError"] = type(error).__name__
+                    if interval is not None:
+                        raise
             return completed
 
     def check_lease(self, job):

@@ -5,7 +5,7 @@
 1. 실제 백엔드 화면에서 목록 노출·기사 열기·좋아요/취소를 생성합니다.
 2. 같은 출처 `/api/behavior/events` 프록시가 서명한 HttpOnly 쿠키로 독자를 확인하고 내부 Bearer 인증으로 FastAPI에 전달합니다.
 3. FastAPI가 형식·소유자·중복을 검사하고 PostgreSQL 트랜잭션 커밋 후 ACK합니다.
-4. 별도 Python worker가 발생 시각 KST 5분 구간별로 JSONL 작업을 고정합니다.
+4. Airflow DAG가 실행 구간의 PostgreSQL 로그를 조회해 gzip JSONL 작업을 고정합니다.
 5. GCS 업로드와 manifest 저장을 확인한 뒤 PostgreSQL 작업을 uploaded로 바꿉니다.
 6. 실패 시 같은 작업 ID·객체명·내용으로 재시도합니다.
 
@@ -28,7 +28,7 @@ npm start
 
 기본 `http://127.0.0.1:4173/`에서 확인합니다. 쿼리스트링이나 모의 화면 전환은 없습니다. 일반 화면 수집은 LOGGING_URL과 LOGGING_TOKEN을 모두 설정했을 때 활성화합니다. 합성 에이전트 모드(SYNTHETIC_AGENT_TOKEN)는 별도 경로를 유지하며 일반 행동을 중복 생성하지 않습니다.
 
-Compose는 PostgreSQL, GCS 에뮬레이터, 버킷 초기화, API, worker를 실행합니다. 실제 GCS 계정 없이 검증하며 실제 클라우드 저장 완료를 의미하지 않습니다. 기본 로컬 PG 포트는 55432, 에뮬레이터는 4443입니다. 초기화 도구는 STORAGE_EMULATOR_HOST가 없으면 실행을 거절하며 실제 버킷을 생성하지 않습니다.
+Compose는 PostgreSQL, GCS 에뮬레이터, 버킷 초기화와 API를 실행합니다. 내보내기는 별도 Airflow 환경에서 실행합니다. 실제 GCS 계정 없이 검증하며 실제 클라우드 저장 완료를 의미하지 않습니다. 기본 로컬 PG 포트는 55432, 에뮬레이터는 4443입니다. 초기화 도구는 STORAGE_EMULATOR_HOST가 없으면 실행을 거절하며 실제 버킷을 생성하지 않습니다.
 
 종료는 `docker compose -f services/logging-server/compose.local.yaml down`입니다. DB·에뮬레이터 볼륨을 보존하며 `down -v`는 사용하지 않습니다. 이미 만들어진 DB의 비밀번호를 바꿀 때는 POSTGRES_PASSWORD 환경변수만 바꾸어서는 적용되지 않습니다. 기존 비밀번호를 사용하거나 DB 사용자 변경 절차를 따릅니다.
 
@@ -52,32 +52,30 @@ Compose는 PostgreSQL, GCS 에뮬레이터, 버킷 초기화, API, worker를 실
 | GOOGLE_CLOUD_PROJECT | 실제 GCP 프로젝트 ID |
 | GCS_PREFIX | 선택적 경로 prefix. 기본 빈 문자열 |
 | LOGGING_HOST / LOGGING_PORT | API 기본 127.0.0.1 / 4195 |
-| LOGGING_FLUSH_MS | worker poll 주기. 기본 30000, 최소 100 |
+| LOGGING_FLUSH_MS | SQLite 로컬 시험의 내보내기 주기. 기본 30000, 최소 100 |
 | LOGGING_MAX_RECORDS | served+actions 총 보관 행 수. 기본 100000 |
 
 `LOGGING_STORE` 기본값은 postgres이며 DSN이 없으면 시작을 거절합니다. 운영 환경에서 STORAGE_EMULATOR_HOST는 설정하지 않습니다. Cloud SQL은 인프라의 Auth Proxy/보안 접속 경로를 이용하며 공용 허용 네트워크를 자동 개방하지 않습니다.
 
-인프라의 objectCreator만으로는 업로드 결과 유실 후 기존 객체를 읽어 같은 내용인지 확인할 수 없습니다. worker에 `storage.objects.get` 권한(예: 버킷 범위 objectViewer 추가)이 필요합니다. 삭제 기능에는 별도의 `storage.objects.delete`도 필요합니다. 권한 부족을 성공으로 숨기지 않고 작업을 prepared로 남겨 재시도합니다. IAM을 자동 변경하지 않았습니다. 구체적인 요청은 [인프라 연동 메모](../../docs/logging-server/postgresql-gcs-integration.md)를 참고합니다.
+인프라의 objectCreator만으로는 업로드 결과 유실 후 기존 객체를 읽어 같은 내용인지 확인할 수 없습니다. Airflow 태스크에 `storage.objects.get` 권한(예: 버킷 범위 objectViewer 추가)이 필요합니다. 삭제 기능에는 별도의 `storage.objects.delete`도 필요합니다. 권한 부족을 성공으로 숨기지 않고 작업을 prepared로 남겨 재시도합니다. IAM을 자동 변경하지 않았습니다. 구체적인 요청은 [인프라 연동 메모](../../docs/logging-server/postgresql-gcs-integration.md)를 참고합니다.
 
-Terraform의 JSONL.gz 주석과 달리 이번 요청에 따라 실제 객체는 압축하지 않은 `.jsonl`입니다. Airflow 담당자와 suffix를 맞춰야 합니다.
+## Airflow DAG 배포
 
-## Python 직접 실행 및 독립 worker
+Airflow 2.10 또는 3의 DAG 폴더에 `dags/export_behavior_logs.py`를 배포합니다. 태스크 실행 환경의 Python 경로에 이 디렉터리의 `logging_service` 패키지를 설치하거나 마운트하고 `requirements.txt`의 psycopg와 google-cloud-storage 의존성을 설치합니다. 실행 환경에 LOGGING_DATABASE_URL, GCS_BUCKET, GOOGLE_CLOUD_PROJECT, 선택 GCS_PREFIX, GCS 자격 증명을 주입합니다. 로컬 에뮬레이터를 쓰려면 Airflow 실행 환경에서 접근 가능한 STORAGE_EMULATOR_HOST를 설정합니다. 로깅 API가 PostgreSQL 스키마를 먼저 초기화해야 합니다.
 
-```powershell
-cd services/logging-server
-python -m venv .venv
-.\.venv\Scripts\python -m pip install -r requirements-dev.txt
-# LOGGING_TOKEN, LOGGING_DATABASE_URL, GCS_BUCKET, GOOGLE_CLOUD_PROJECT 설정 후
-.\.venv\Scripts\python -m logging_service
-# 같은 환경의 다른 터미널
-.\.venv\Scripts\python -m logging_service.worker
-# 한 번 내보내기. 실패를 종료 코드로 확인합니다.
-.\.venv\Scripts\python -m logging_service.worker --once --force
+자동 실행 주기가 확정되면 DAG 파서에 `BEHAVIOR_EXPORT_CRON`(UTC cron)과 `BEHAVIOR_EXPORT_START`(첫 데이터 구간을 포함하도록 맞춘 UTC ISO 8601 시각)를 설정하고 DAG를 활성화합니다. catchup이 켜져 있으므로 시작일은 필요한 이력 범위에 맞춥니다. cron 설정 전에는 자동 실행 없이 수동 run의 conf에 아래처럼 실제 처리 범위를 입력합니다.
+
+```json
+{"interval_start":"2026-11-13T00:00:00Z","interval_end":"2026-11-13T00:15:00Z"}
 ```
 
-API는 원본 수신만 담당합니다. GCS 업로드를 기다리지 않고 PostgreSQL 커밋 후 ACK합니다. API와 worker는 별도 프로세스·컨테이너로 실행합니다. 업로드 중에는 수신 트랜잭션 잠금을 잡지 않습니다.
+정기 실행은 Airflow의 data_interval_start와 data_interval_end를 사용합니다. 조회 범위는 UTC PostgreSQL received_at 기준 시작 이상, 끝 미만입니다. 지연 수신 이벤트는 수신된 구간으로 들어가며 served_at/event_time은 그대로 보존합니다. 이미 내보낸 행은 export_members로 제외하고 동일 구간 실패 작업은 같은 객체명으로 재시도합니다.
 
-PostgreSQL `behavior_logging` 스키마에 served_records, action_records, export_jobs, export_members, revoked_users와 스키마 버전을 만듭니다. DB 사용자는 이 스키마를 생성할 권한이 필요합니다. 뉴스 테이블을 수정하지 않습니다. 초기 구현은 수신·용량·철회 판정을 짧은 트랜잭션 advisory lock으로 직렬화합니다. worker는 별도 session advisory lock으로 한 번에 하나만 export하며, 프로세스 종료 시 PostgreSQL이 잠금을 해제합니다. 부하 증가 시 수신 lock·전체 count·준비 작업량 최적화가 필요합니다.
+기존 worker를 실행 중인 환경은 이전 worker로 prepared 작업을 먼저 마무리한 뒤 중지하고 DAG를 활성화합니다. 과거 미처리 행을 옮길 때는 첫 구간 또는 수동 실행 범위에 해당 수신 시각을 포함합니다. 이미 내보낸 과거 .jsonl 객체는 기존 경로에 남습니다. 다운스트림 소비자는 새 interval_start/interval_end 경로와 .jsonl.gz를 읽도록 배포 전에 맞춰야 합니다.
+
+API는 PostgreSQL 커밋 후 ACK합니다. Airflow 태스크는 GCS 업로드 중 수신 트랜잭션 잠금을 잡지 않습니다.
+
+PostgreSQL `behavior_logging` 스키마에 served_records, action_records, export_jobs, export_members, revoked_users와 스키마 버전을 만듭니다. DB 사용자는 이 스키마를 생성할 권한이 필요합니다. 뉴스 테이블을 수정하지 않습니다. 초기 구현은 수신·용량·철회 판정을 짧은 트랜잭션 advisory lock으로 직렬화합니다. Airflow 태스크는 별도 session advisory lock으로 한 번에 하나만 export하며, 프로세스 종료 시 PostgreSQL이 잠금을 해제합니다. 부하 증가 시 수신 lock·전체 count·준비 작업량 최적화가 필요합니다.
 
 ## 같은 출처 프록시와 독자 문맥
 
@@ -114,7 +112,7 @@ GCP의 정적 프런트엔드는 기존 Nginx를 유지합니다. 같은 출처 
 - POST /internal/served-file: file(JSONL), request_id, expected_item_count multipart. 전체 검증·원자 커밋 후에만 200
 
 두 served 경로 모두 추천 메타데이터 `score`(유한 JSON 숫자 또는 fallback의 null), `model_version`(문자열 또는 null), `features_as_of`(시간대가 있는 ISO 8601 문자열 또는 null)를 선택적으로 받습니다. 기존 필드만 있는 레코드도 수락합니다. 전달된 값과 명시적 null은 원본 저장 JSON과 내보내기 JSONL에 보존합니다. 프록시는 기사별 점수를 전달하고, 모델 버전과 피처 기준 시각은 기사별 값이 없을 때 피드 공통 값을 사용합니다. 백엔드가 생략한 값은 생략합니다.
-- POST /internal/flush: PostgreSQL에서는 202로 외부 worker poll 방식을 알림. 즉시 실행은 worker --once --force
+- POST /internal/flush: PostgreSQL에서는 202로 Airflow 모드를 알림. 즉시 실행은 구간을 지정한 DAG 수동 실행
 - POST /internal/delete-user: `{reader_id:string}`. 철회 후 GCS 원본·manifest·DB 삭제. 읽기·삭제 권한 필요
 
 JSON ACK는 accepted/duplicate/rejected/retryable을 유지합니다. accepted는 PostgreSQL 커밋이며 GCS 저장 완료가 아닙니다. 본문 전체 256KiB, 배치 1~100행, 행동 4KiB입니다. event_time/served_at은 과거24시간~미래5분 이내입니다. HTTP 400/401/403/413/415/503과 개별 rejected를 구분합니다. 본문에 reader_id/source를 넣어 신뢰 문맥을 우회할 수 없습니다.
@@ -124,18 +122,18 @@ JSON ACK는 accepted/duplicate/rejected/retryable을 유지합니다. accepted�
 ## 5분 구간과 중복 없는 GCS 저장
 
 ```text
-served/date=2026-11-10/hour=09/minute=00/part-{job_id}.jsonl
-actions/date=2026-11-10/hour=09/minute=00/part-{job_id}.jsonl
+served/interval_start={UTC start}/interval_end={UTC end}/part-{job_id}.jsonl.gz
+actions/interval_start={UTC start}/interval_end={UTC end}/part-{job_id}.jsonl.gz
 manifests/{job_id}.json
 ```
 
-발생 시각을 KST로 바꾸어 09:00:00 이상~09:05:00 미만을 minute=00으로 묶습니다. 수신 시각·worker 실행 시각으로 구간을 정하지 않습니다. 원본은 UTC로 보존합니다. poll 주기30초와 구간5분은 별개이며 한 구간에 여러 part 파일이 생길 수 있습니다. 늦게 도착한 기록은 같은 발생 구간의 새 part에 저장합니다. 테이블을 시간 파티션으로 만들지 않습니다.
+실행 구간별로 독자와 스트림에 따라 여러 gzip 파일을 생성할 수 있습니다. DB에는 조회용 received_at 인덱스를 추가합니다.
 
-작업은 stream·독자·5분 구간별 최대1000행입니다. DB 트랜잭션으로 job_id·구성원·객체명·내용·SHA-256을 고정합니다. GCS는 if_generation_match=0으로 새 객체만 생성합니다. 기존 객체가 있으면 동일 generation을 읽고 실제 내용 hash를 비교합니다. 다르면 덮어쓰지 않고 오류로 남깁니다. 객체와 manifest 성공 뒤에만 uploaded와 GCS generation receipt를 커밋합니다. 업로드 뒤 DB 갱신 전 종료해도 같은 객체를 확인해 복구합니다.
+작업은 stream·독자·DAG 실행 구간별 최대1000행입니다. DB 트랜잭션으로 job_id·구성원·객체명·내용·SHA-256을 고정합니다. GCS는 if_generation_match=0으로 새 객체만 생성합니다. 기존 객체가 있으면 동일 generation을 읽고 실제 내용 hash를 비교합니다. 다르면 덮어쓰지 않고 오류로 남깁니다. 객체와 manifest 성공 뒤에만 uploaded와 GCS generation receipt를 커밋합니다. 업로드 뒤 DB 갱신 전 종료해도 같은 객체를 확인해 복구합니다.
 
-업로드 실패는 DB attempts·next_attempt_at으로 지수 재시도합니다. worker는 매 cycle 연결을 새로 열어 DB 재시작 후에도 다시 시도합니다. API의 다음 수신도 끊긴 연결을 복구합니다. 작업 content와 DB 원본은 업로드 후에도 유지하므로 보관량 상한을 자동 해소하지 않습니다. 자동 보관·아카이브와 대량 성능 검증은 후속입니다.
+업로드 실패는 Airflow 태스크를 실패 처리합니다. 재시도마다 DB 연결을 새로 열어 해당 구간의 미완료 작업만 처리합니다. API의 다음 수신도 끊긴 연결을 복구합니다. 작업 content와 DB 원본은 업로드 후에도 유지하므로 보관량 상한을 자동 해소하지 않습니다. 자동 보관·아카이브와 대량 성능 검증은 후속입니다.
 
-session advisory lock은 DB 연결이 살아 있는 동안만 유효합니다. worker는 외부 쓰기 전후와 상태 갱신 전에 같은 연결·미철회 작업을 확인하며, 연결을 잃은 export 안에서는 자동 재접속하지 않습니다. 삭제 시 객체·manifest 이름을 deletion_targets에 영구 기록하고, 다음 worker cycle마다 이 목록의 잔여 객체를 삭제합니다. 원본과 작업을 삭제한 뒤에도 철회 표시와 이 정리 목록은 유지합니다. 이미 시작한 GCS 요청은 DB 잠금 유실 후에도 완료될 수 있어 삭제 응답 후 파일이 일시적으로 다시 나타날 수 있습니다. 후속 정리가 성공해야 사라지며 worker 중단·삭제 권한 부족 동안은 남을 수 있습니다. 즉시 부활 방지를 보장하지 않으며 worker에 읽기·생성·삭제 권한이 필요합니다. PostgreSQL 연결 강제 종료 → 사용자 삭제 → 지연 업로드 완료 → 새 worker 정리 순서를 통합 시험합니다. 목록 전체 재검사의 비용 최적화는 후속입니다.
+session advisory lock은 DB 연결이 살아 있는 동안만 유효합니다. Airflow 태스크는 외부 쓰기 전후와 상태 갱신 전에 같은 연결·미철회 작업을 확인하며, 연결을 잃은 export 안에서는 자동 재접속하지 않습니다. 삭제 시 객체·manifest 이름을 deletion_targets에 영구 기록하고, 다음 DAG 실행마다 이 목록의 잔여 객체를 삭제합니다. 원본과 작업을 삭제한 뒤에도 철회 표시와 이 정리 목록은 유지합니다. 이미 시작한 GCS 요청은 DB 잠금 유실 후에도 완료될 수 있어 삭제 응답 후 파일이 일시적으로 다시 나타날 수 있습니다. 후속 정리가 성공해야 사라지며 DAG 중단·삭제 권한 부족 동안은 남을 수 있습니다. 즉시 부활 방지를 보장하지 않으며 Airflow 태스크에 읽기·생성·삭제 권한이 필요합니다. PostgreSQL 연결 강제 종료 → 사용자 삭제 → 지연 업로드 완료 → 후속 내보내기 정리 순서를 통합 시험합니다. 목록 전체 재검사의 비용 최적화는 후속입니다.
 
 ## 검증
 
@@ -162,7 +160,7 @@ $env:PLAYWRIGHT_CHANNEL='msedge' # Windows 설치 브라우저 예시. CI는 Chr
 npm run test:browser
 ```
 
-PG/GCS 시험 환경변수가 있으면 일반 화면 브라우저 테스트가 노출·클릭·좋아요·취소, 응답 유실 후 재시도, 서명 없는 요청 차단, worker 실행과 GCS 원본의 event_id 대조까지 검증합니다. 가상 기사·시험 사용자만 사용합니다. 에뮬레이터는 IAM·실제 Cloud SQL·GCS 운영 배포를 검증하지 않습니다.
+PG/GCS 시험 환경변수가 있으면 일반 화면 브라우저 테스트가 노출·클릭·좋아요·취소, 응답 유실 후 재시도, 서명 없는 요청 차단, DAG 태스크 함수 실행과 GCS 원본의 event_id 대조까지 검증합니다. 가상 기사·시험 사용자만 사용합니다. 에뮬레이터는 IAM·실제 Cloud SQL·GCS 운영 배포를 검증하지 않습니다.
 
 ## 이전 SQLite 구현
 
@@ -172,4 +170,4 @@ LOGGING_STORE=sqlite를 명시하면 이전 SQLite·로컬 파일 경로로 회�
 
 ### 저장 대상 변경 시 주의
 
-prepared 작업이 남아 있는 동안 GCS_BUCKET/GCS_PREFIX를 바꾸지 않습니다. 작업 내용과 객체명은 DB에 고정하지만 bucket/prefix는 worker 환경에서 주입합니다. 저장 대상 이전은 기존 작업 처리와 객체 대조를 마친 뒤 별도 절차로 진행합니다.
+prepared 작업이 남아 있는 동안 GCS_BUCKET/GCS_PREFIX를 바꾸지 않습니다. 작업 내용과 객체명은 DB에 고정하지만 bucket/prefix는 Airflow 태스크 환경에서 주입합니다. 저장 대상 이전은 기존 작업 처리와 객체 대조를 마친 뒤 별도 절차로 진행합니다.

@@ -97,11 +97,12 @@ class PostgresStore(Store):
                 self.connection.execute("SELECT pg_advisory_xact_lock(%s)", (INTAKE_LOCK,))
                 yield
 
-    def jobs(self, force=False):
+    def jobs(self, force=False, interval_path=None):
         return [dict(row) for row in self.connection.execute(
             "SELECT j.* FROM export_jobs j WHERE status!='uploaded' AND NOT EXISTS "
-            "(SELECT 1 FROM revoked_users r WHERE r.reader_id=j.reader_id) AND (%s OR next_attempt_at<=%s) ORDER BY created_at,job_id",
-            (force, self.now()))]
+            "(SELECT 1 FROM revoked_users r WHERE r.reader_id=j.reader_id) AND (%s OR next_attempt_at<=%s) "
+            "AND (%s::text IS NULL OR partition_path=%s) ORDER BY created_at,job_id",
+            (force, self.now(), interval_path, interval_path))]
 
     def mark(self, job, error=None, receipt=None):
         self.check_export_lease(job)

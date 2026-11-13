@@ -1,3 +1,4 @@
+import gzip
 import os
 
 from google.api_core.exceptions import NotFound, PreconditionFailed
@@ -27,16 +28,21 @@ class GCSSink:
     def put(self, name, content):
         blob = self.blob(name)
         hashed = digest(content)
+        data = content.encode("utf-8")
+        compressed = name.endswith(".jsonl.gz")
+        payload = gzip.compress(data, mtime=0) if compressed else data
+        content_type = "application/gzip" if compressed else (
+            "application/x-ndjson" if name.endswith(".jsonl") else "application/json")
         blob.metadata = {"sha256": hashed}
         try:
-            blob.upload_from_string(content.encode("utf-8"), content_type="application/x-ndjson" if name.endswith(".jsonl") else "application/json",
+            blob.upload_from_string(payload, content_type=content_type,
                 if_generation_match=0, checksum="crc32c", timeout=30, retry=DEFAULT_RETRY_IF_GENERATION_SPECIFIED)
         except PreconditionFailed:
             # A prior upload may have succeeded just before the process lost its ACK.
             # Read the exact generation and compare bytes; never overwrite on conflict.
             blob.reload(timeout=30)
             existing = blob.download_as_bytes(if_generation_match=blob.generation, timeout=30)
-            if digest(existing.decode("utf-8")) != hashed:
+            if (gzip.decompress(existing) if compressed else existing) != data:
                 raise ValueError("OBJECT_CONTENT_CONFLICT") from None
         if not blob.generation:
             blob.reload(timeout=30)

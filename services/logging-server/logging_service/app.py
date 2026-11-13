@@ -237,7 +237,7 @@ def create_app(settings=None):
     def ready(request: Request):
         with request.app.state.store.lock:
             exporter = request.app.state.exporter
-            return {**request.app.state.store.readiness(), "exporter": exporter.state if exporter else {"mode": "external-worker"}}
+            return {**request.app.state.store.readiness(), "exporter": exporter.state if exporter else {"mode": "airflow"}}
 
     @app.post("/internal/served", dependencies=json_protected)
     def receive_served(request: Request, body: Records):
@@ -279,7 +279,7 @@ def create_app(settings=None):
     @app.post("/internal/flush", dependencies=json_protected)
     def flush(request: Request, body: dict = Body(...)):
         if request.app.state.config.database_url:
-            return JSONResponse({"scheduled": True, "mode": "external-worker"}, status_code=202)
+            return JSONResponse({"scheduled": False, "mode": "airflow"}, status_code=202)
         return {"completed": request.app.state.exporter.flush(True)}
 
     @app.post("/internal/delete-user", dependencies=json_protected)

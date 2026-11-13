@@ -1,11 +1,10 @@
 import json
 import os
-import subprocess
-import sys
+import gzip
 import time
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
+from datetime import datetime, timezone
 from uuid import uuid4
 
 import psycopg
@@ -17,6 +16,7 @@ from psycopg.conninfo import conninfo_to_dict, make_conninfo
 from logging_service.app import Settings, create_app
 from logging_service.exporter import Exporter
 from logging_service.gcs import GCSSink
+from logging_service.interval_export import export_interval
 from logging_service.postgres import PostgresStore
 from logging_service.schema import iso
 
@@ -66,7 +66,7 @@ def test_postgres_commit_ack_and_worker_receipt(database, sink):
         headers = {"x-news-reader": "reader", "x-collection-enabled": "true"}
         assert client.post("/events", json={"events": [event]}, headers=headers).json()["results"][0]["status"] == "accepted"
         assert client.post("/events", json={"events": [event]}, headers=headers).json()["results"][0]["status"] == "duplicate"
-        assert client.get("/ready").json()["exporter"]["mode"] == "external-worker"
+        assert client.get("/ready").json()["exporter"]["mode"] == "airflow"
     store = PostgresStore(database)
     assert store.counts() == {"served": 1, "actions": 1}
     assert Exporter(store, sink).flush(True) == 2
@@ -163,14 +163,26 @@ def test_five_minute_event_time_and_late_arrival(database, sink):
     store.close()
 
 
-def test_actual_worker_process_and_delete(database, sink):
-    store = PostgresStore(database)
+def test_airflow_interval_export_retry_and_delete(database, sink, monkeypatch):
+    start = int(time.time() * 1000)
+    clock = start
+    store = PostgresStore(database, now=lambda: clock)
     row, event = records()
     store.intake_served({"records": [row]})
     store.intake_actions({"events": [event]}, "reader", True)
-    subprocess.run([sys.executable, "-m", "logging_service.worker", "--once", "--force"], check=True,
-        cwd=Path(__file__).resolve().parents[1], env={**os.environ, "LOGGING_STORE": "postgres", "LOGGING_TOKEN": TOKEN,
-            "LOGGING_DATABASE_URL": database, "GCS_BUCKET": sink.bucket.name, "GOOGLE_CLOUD_PROJECT": "local-integration", "GCS_PREFIX": sink.prefix})
+    clock = start + 1000
+    store.intake_served({"records": [{**row, "impression_id": "next-interval"}]})
+    monkeypatch.setenv("LOGGING_DATABASE_URL", database)
+    monkeypatch.setenv("GCS_BUCKET", sink.bucket.name)
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "local-integration")
+    monkeypatch.setenv("GCS_PREFIX", sink.prefix)
+    bounds = tuple(datetime.fromtimestamp(ms / 1000, timezone.utc) for ms in (start, clock))
+    assert export_interval(*bounds) == 2
+    files = [blob for blob in sink.client.list_blobs(sink.bucket, prefix=sink.prefix) if blob.name.endswith(".jsonl.gz")]
+    assert len(files) == 2
+    assert {json.loads(gzip.decompress(blob.download_as_bytes()))["impression_id"] for blob in files} == {"imp"}
+    assert export_interval(*bounds) == 0
+    assert store.readiness()["pendingRecords"] == 1
     assert not store.jobs(True)
     Exporter(store, sink).delete("reader")
     assert store.counts() == {"served": 0, "actions": 0}

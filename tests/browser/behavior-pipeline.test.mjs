@@ -14,6 +14,7 @@ test('ordinary screen exposure/open/like travels through proxy, PostgreSQL and G
  const token=randomUUID(),prefix='browser-'+randomUUID();
  const listen=async server=>{server.listen(0,'127.0.0.1');await once(server,'listening');t.after(()=>new Promise(resolve=>server.close(resolve)));return `http://127.0.0.1:${server.address().port}`;};
  const reserve=async()=>{const s=createServer();s.listen(0,'127.0.0.1');await once(s,'listening');const p=s.address().port;await new Promise(r=>s.close(r));return p;};
+ const intervalStart=new Date().toISOString();
  const port=await reserve(),loggingUrl=`http://127.0.0.1:${port}`;
  const env={...process.env,LOGGING_STORE:'postgres',LOGGING_TOKEN:token,LOGGING_DATABASE_URL:process.env.TEST_POSTGRES_URL,LOGGING_PORT:String(port),GCS_BUCKET:'integration-raw-logs',GOOGLE_CLOUD_PROJECT:'local-integration',GCS_PREFIX:prefix};
  const child=spawn(python,['-m','logging_service'],{cwd:service,env,stdio:['ignore','ignore','pipe']});let log='';child.stderr.on('data',b=>log+=b.toString());
@@ -45,7 +46,7 @@ test('ordinary screen exposure/open/like travels through proxy, PostgreSQL and G
  assert(lost);assert(rows.some(r=>r.event_type==='exposure'&&r.duration_ms>0));assert.equal(rows.filter(r=>r.event_type==='article_open').length,1);assert.equal(rows.filter(r=>r.event_type==='like').length,1);assert.equal(rows.filter(r=>r.event_type==='unlike').length,1);assert(rows.every(r=>r.source==='browser'));
  // Forged reader/source headers cannot change the cookie-bound identity.
  const attacker=await browser.newContext();const response=await attacker.request.post(url+'/api/behavior/events',{headers:{Origin:url,'x-news-reader':readerIds[0]},data:{events:[JSON.parse(rows[0].canonical_json)]}});assert.equal(response.status(),403);await attacker.close();
- execFileSync(python,['-m','logging_service.worker','--once','--force'],{cwd:service,env});
- const exported=JSON.parse(execFileSync(python,['-c',"import os,json;from logging_service.gcs import GCSSink;s=GCSSink(os.environ['GCS_BUCKET'],os.environ['GOOGLE_CLOUD_PROJECT'],os.environ['GCS_PREFIX']);files=[b for b in s.client.list_blobs(s.bucket,prefix=s.prefix) if b.name.endswith('.jsonl')];print(json.dumps({'files':[b.name for b in files],'events':[json.loads(line)['event_id'] for b in files if '/actions/' in b.name for line in b.download_as_text().splitlines()]}))"],{cwd:service,env,encoding:'utf8'}));
- assert(exported.files.every(name=>/date=\d{4}-\d{2}-\d{2}\/hour=\d{2}\/minute=\d[05]\//.test(name)));for(const row of rows)assert(exported.events.includes(row.event_id));
+ execFileSync(python,['-c','import sys;from datetime import datetime;from logging_service.interval_export import export_interval;export_interval(*(datetime.fromisoformat(t) for t in sys.argv[1:]))',intervalStart,new Date(Date.now()+1000).toISOString()],{cwd:service,env});
+ const exported=JSON.parse(execFileSync(python,['-c',"import os,json,gzip;from logging_service.gcs import GCSSink;s=GCSSink(os.environ['GCS_BUCKET'],os.environ['GOOGLE_CLOUD_PROJECT'],os.environ['GCS_PREFIX']);files=[b for b in s.client.list_blobs(s.bucket,prefix=s.prefix) if b.name.endswith('.jsonl.gz')];print(json.dumps({'files':[b.name for b in files],'events':[json.loads(line)['event_id'] for b in files if '/actions/' in b.name for line in gzip.decompress(b.download_as_bytes()).splitlines()]}))"],{cwd:service,env,encoding:'utf8'}));
+ assert(exported.files.every(name=>/interval_start=.*\/interval_end=.*\//.test(name)));for(const row of rows)assert(exported.events.includes(row.event_id));
 });

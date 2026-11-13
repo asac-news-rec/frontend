@@ -29,7 +29,7 @@ services:
   logging:
     build: .
     ports: ["127.0.0.1:${LOGGING_PORT:-4195}:4195"]
-    environment: &logging-env
+    environment:
       LOGGING_TOKEN: "${LOGGING_TOKEN:?Set LOGGING_TOKEN}"
       LOGGING_STORE: postgres
       LOGGING_DATABASE_URL: "postgresql://logging:${LOCAL_POSTGRES_PASSWORD:?Set local DB password}@postgres:5432/logging"
@@ -44,13 +44,6 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
-  worker:
-    build: .
-    command: ["python", "-m", "logging_service.worker"]
-    environment: *logging-env
-    depends_on:
-      postgres: {condition: service_healthy}
-      gcs-init: {condition: service_completed_successfully}
 volumes:
   logging-postgres:
   logging-gcs:
