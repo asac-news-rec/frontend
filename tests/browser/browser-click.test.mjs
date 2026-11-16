@@ -81,7 +81,13 @@ test('real browser click reaches SQLite once, isolated readers and invalid choic
  try{
   await context.request.post(url+'/api/synthetic/session',{headers:{'x-synthetic-agent':agentToken}});
   const page=await context.newPage();
-  await page.addInitScript(()=>{window.IntersectionObserver=undefined;});
+  // Keep observer construction available while driving pagination manually.
+  await page.addInitScript(()=>{
+   window.IntersectionObserver=class {
+    observe(){}
+    disconnect(){}
+   };
+  });
   await page.goto(url);
   await page.locator('a[data-article]').first().waitFor();
   const firstFeed=feeds.at(-1);
