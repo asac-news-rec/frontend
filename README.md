@@ -63,7 +63,7 @@ docker build --target static --output type=local,dest=./site .
 ## 뉴스 API와 현재 한계
 
 - 브라우저 API: `POST /api/user/anonymous`, `POST /api/category`, `POST /api/subcategory`, `POST /api/news/feed`, `PUT/DELETE /api/news/{article_id}/like`.
-- 브라우저에 UUID7 `reader_id`를 저장하고, 좋아요는 백엔드에 저장합니다. 카테고리·소분류 필터와 `next_offset` 페이지 처리는 백엔드 계약을 유지합니다.
+- 첫 피드 조회 전에 `POST /api/user/anonymous`를 본문 없이 호출합니다. 브라우저는 백엔드가 발급한 `news_reader` 쿠키를 후속 요청에 보냅니다. 피드 첫 요청은 필터만 담고, 다음 요청은 같은 필터와 직전 응답의 `next_cursor`를 담습니다. 좋아요 등록·해제는 본문 없이 호출합니다.
 - 피드 최상위 `reader_id`가 없는 성공 응답도 허용합니다. 기사의 `is_synthetic` 값에 따라 가상 여부를 표시합니다.
 - 추천 모델과 운영 행동 수집 서버는 연결하지 않았습니다. 로컬 가상 독자 세션의 클릭 수집만 별도 지원합니다. 기사 상세를 새로고침하면 목록 캐시가 없어 목록에서 다시 열어야 합니다.
 - 백엔드 참고 화면과 동일하게 기존 `localhost:8001`·`127.0.0.1:8001` 이미지 URL은 `/images/`로 연결합니다. DB를 바꾸지 않으며 외부 HTTP(S) 이미지 URL은 유지합니다.

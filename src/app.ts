@@ -1,6 +1,6 @@
 import type {Article, Feed, FeedItem} from './types.js';
 import {likeButton,seedBackendLikes} from './likes.js';
-import {getBackendPage,getBackendCategories,getBackendSubcategories} from './backend-api.js';
+import {getBackendPage,getBackendCategories,getBackendSubcategories,type FeedCursor} from './backend-api.js';
 import {initializeSyntheticEvents,recordSyntheticOpen} from './synthetic-events.js';
 import {initializeBehavior,connectBehavior} from './behavior-events.js';
 let pendingOpen:{articleId:string;impressionId:string}|null=null;
@@ -12,7 +12,7 @@ let categories: string[]=[];
 let subcategories: string[]=[];
 let subcategoryRequest=0;
 let observer: IntersectionObserver | undefined;
-let nextOffset: number | null=null;
+let nextCursor: FeedCursor | null=null;
 let loadingMore=false;
 let moreError='';
 let categoryError='';
@@ -62,30 +62,30 @@ function results(){
 }
 function pagination(){
   if(moreError)return `<p role="alert">${escape(moreError)}</p><button id="more">다시 불러오기</button>`;
-  if(nextOffset===null)return '<p class="end-note">모든 기사를 확인했어요.</p>';
+  if(nextCursor===null)return '<p class="end-note">모든 기사를 확인했어요.</p>';
   return `<div id="sentinel" role="status">${loadingMore?'기사를 더 불러오고 있어요…':'아래로 내리면 기사가 이어집니다.'}</div><button id="more" ${loadingMore?'disabled':''}>기사 더 보기</button>`;
 }
 function connectMore(){
   main.querySelector('#more')?.addEventListener('click',loadMore);
   const target=main.querySelector('#sentinel');
-  if(target&&nextOffset!==null&&!moreError&&'IntersectionObserver' in window){
+  if(target&&nextCursor!==null&&!moreError&&'IntersectionObserver' in window){
     observer=new IntersectionObserver(entries=>{if(entries.some(entry=>entry.isIntersecting))loadMore();},{rootMargin:'0px 0px 240px 0px'});
     observer.observe(target);
   }
 }
 async function loadMore(){
-  if(!state.feed||loadingMore||nextOffset===null||state.articleId||state.status!=='ready')return;
+  if(!state.feed||loadingMore||nextCursor===null||state.articleId||state.status!=='ready')return;
   const token=state.request;
-  const offset=nextOffset;
+  const cursor=nextCursor;
   loadingMore=true;moreError='';
   const panel=main.querySelector('#pagination');
   if(panel)panel.innerHTML=pagination();
   try{
-    const page=await getBackendPage(offset,{filters:selectedFilters()});
+    const page=await getBackendPage(cursor,{filters:selectedFilters()});
     if(token!==state.request)return;
     const known=new Set(state.feed.items.map(item=>item.article.id));
     const added=page.items.filter(item=>!known.has(item.article.id));
-    state.feed.items.push(...added);nextOffset=page.nextOffset;added.forEach(item=>backendArticles.set(item.article.id,item.article));seedBackendLikes(added);
+    state.feed.items.push(...added);nextCursor=page.nextCursor;added.forEach(item=>backendArticles.set(item.article.id,item.article));seedBackendLikes(added);
     if(!state.articleId)main.querySelector('.cards')?.insertAdjacentHTML('beforeend',added.map(card).join(''));behavior.observe();
   }catch(error){if(token!==state.request)return;moreError=error instanceof Error ? error.message : String(error);}
   finally{
@@ -93,10 +93,10 @@ async function loadMore(){
   }
 }
 async function load(){
-  const token=++state.request;state.status='loading';nextOffset=null;loadingMore=false;moreError='';render();
+  const token=++state.request;state.status='loading';nextCursor=null;loadingMore=false;moreError='';render();
   try{
-    const feed=await getBackendPage(0,{filters:selectedFilters()});if(token!==state.request)return;
-    state.feed=feed;nextOffset=feed.nextOffset;backendArticles.clear();feed.items.forEach(item=>backendArticles.set(item.article.id,item.article));seedBackendLikes(feed.items,true);state.status='ready';
+    const feed=await getBackendPage(null,{filters:selectedFilters()});if(token!==state.request)return;
+    state.feed=feed;nextCursor=feed.nextCursor;backendArticles.clear();feed.items.forEach(item=>backendArticles.set(item.article.id,item.article));seedBackendLikes(feed.items,true);state.status='ready';
   }
   catch(error){if(token!==state.request)return;state.status='error';state.error=error instanceof Error ? error.message : String(error);}
   render();

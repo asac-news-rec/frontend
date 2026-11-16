@@ -44,11 +44,18 @@ async function request(route: string,body: object | undefined,method='POST',fetc
  return response.json();
 }
 
-export async function getBackendPage(offset=0,{fetchImpl=fetch,getReaderId=getBackendReaderId,filters={}}: {fetchImpl?: typeof fetch; getReaderId?: typeof getBackendReaderId; filters?: BackendFilters}={}){
+export interface FeedCursor { published_at: string; article_id: string; returned_count: number }
+
+function isFeedCursor(value: FeedCursor | null): boolean {
+ return value===null||Boolean(value&&typeof value.published_at==='string'&&Number.isFinite(Date.parse(value.published_at))&&
+  typeof value.article_id==='string'&&value.article_id.length&&Number.isSafeInteger(value.returned_count)&&value.returned_count>0);
+}
+
+export async function getBackendPage(cursor: FeedCursor | null=null,{fetchImpl=fetch,getReaderId=getBackendReaderId,filters={}}: {fetchImpl?: typeof fetch; getReaderId?: typeof getBackendReaderId; filters?: BackendFilters}={}){
  const readerId=await getReaderId();
- const response: {collection_enabled?:boolean; reader_id?: string; request_id: string; served_at: string; items: BackendArticle[]; next_offset: number | null}=await request('/news/feed',{reader_id:readerId,offset,...(filters.category?{category:filters.category}:{}),...(filters.subcategory?{subcategory:filters.subcategory}:{})},'POST',fetchImpl);
+ const response: {collection_enabled?:boolean; reader_id?: string; request_id: string; served_at: string; items: BackendArticle[]; next_cursor: FeedCursor | null}=await request('/news/feed',{...(cursor===null?{}:{cursor}),...(filters.category?{category:filters.category}:{}),...(filters.subcategory?{subcategory:filters.subcategory}:{})},'POST',fetchImpl);
  if(!response||(response.reader_id!==undefined&&response.reader_id!==readerId)||typeof response.request_id!=='string'||!Number.isFinite(Date.parse(response.served_at))||
-  !Array.isArray(response.items)||!(response.next_offset===null||typeof response.next_offset==='number'&&Number.isSafeInteger(response.next_offset)&&response.next_offset>=0))throw new Error('INVALID_BACKEND_FEED');
+  !Array.isArray(response.items)||!isFeedCursor(response.next_cursor))throw new Error('INVALID_BACKEND_FEED');
  const items=response.items.map((item: BackendArticle)=>{
   if(!item||typeof item.article_id!=='string'||typeof item.impression_id!=='string'||
    !Number.isSafeInteger(item.position)||item.position<1||typeof item.title!=='string'||
@@ -63,12 +70,11 @@ export async function getBackendPage(offset=0,{fetchImpl=fetch,getReaderId=getBa
  });
  if(typeof response.collection_enabled==='boolean')setBehaviorCollection(response.collection_enabled);
  return {generatedAt:response.served_at,strategy:'backend_latest',requestId:response.request_id,
-  items,nextOffset:response.next_offset};
+  items,nextCursor:response.next_cursor};
 }
 
-export async function changeBackendLike(articleId: string,liked: boolean,{fetchImpl=fetch,getReaderId=getBackendReaderId}={}){
- const readerId=await getReaderId();
- const result=await request(`/news/${encodeURIComponent(articleId)}/like`,{reader_id:readerId},liked?'PUT':'DELETE',fetchImpl);
+export async function changeBackendLike(articleId: string,liked: boolean,{fetchImpl=fetch}={}){
+ const result=await request(`/news/${encodeURIComponent(articleId)}/like`,undefined,liked?'PUT':'DELETE',fetchImpl);
  if(!result||result.article_id!==articleId||result.is_liked!==liked||typeof result.changed!=='boolean')throw new Error('INVALID_BACKEND_LIKE');
  return result;
 }

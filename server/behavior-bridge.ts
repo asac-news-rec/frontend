@@ -1,21 +1,25 @@
 import {createHmac,timingSafeEqual} from 'node:crypto';
 import type {IncomingMessage,ServerResponse} from 'node:http';
+import {newsReaderCookie} from './backend-proxy.js';
 
 export interface LoggingConfig {url:string;token:string}
 interface Session {readerId:string;expires:number}
 export function createBehaviorBridge(origin:string,backendUrl:string|undefined,config?:LoggingConfig){
  if(config&&config.token.length<24)throw new Error('LOGGING_TOKEN_MIN_24_CHARS');
- const sign=(payload:string,name:string)=>createHmac('sha256',config!.token).update(name+'\0'+payload).digest('base64url');
- const cookie=(name:string,readerId:string)=>{
+ const proofName='news_behavior_reader';
+ const sign=(payload:string,name:string,readerCookie='')=>createHmac('sha256',config!.token).update(name+'\0'+payload+(readerCookie?'\0'+readerCookie:'')).digest('base64url');
+ const cookie=(name:string,readerId:string,readerCookie='')=>{
   const payload=Buffer.from(JSON.stringify({readerId,expires:Date.now()+30*86400000})).toString('base64url');
-  return `${name}=${payload}.${sign(payload,name)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000${new URL(origin).protocol==='https:'?'; Secure':''}`;
+  return `${name}=${payload}.${sign(payload,name,readerCookie)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000${new URL(origin).protocol==='https:'?'; Secure':''}`;
  };
  const current=(req:IncomingMessage,name='news_behavior')=>{
   if(!config)return;
   const value=new RegExp('\\b'+name+'=([^;]+)').exec(req.headers.cookie??'')?.[1];
   if(!value||value.length>1024)return;
   const [payload,signature,...extra]=value.split('.');if(!payload||!signature||extra.length)return;
-  const expected=sign(payload,name);if(Buffer.byteLength(signature)!==Buffer.byteLength(expected)||!timingSafeEqual(Buffer.from(signature),Buffer.from(expected)))return;
+  const readerCookie=name===proofName?newsReaderCookie(req.headers.cookie):'';
+  if(readerCookie===undefined)return;
+  const expected=sign(payload,name,readerCookie);if(Buffer.byteLength(signature)!==Buffer.byteLength(expected)||!timingSafeEqual(Buffer.from(signature),Buffer.from(expected)))return;
   try{const session=JSON.parse(Buffer.from(payload,'base64url').toString('utf8')) as Session;
    if(typeof session.readerId==='string'&&session.readerId.length<=128&&typeof session.expires==='number'&&session.expires>Date.now())return session;
   }catch{}
@@ -26,15 +30,15 @@ export function createBehaviorBridge(origin:string,backendUrl:string|undefined,c
   return response.json();
  };
  return {
-  onReaderIssued(req:IncomingMessage,res:ServerResponse,payload:unknown){
-   if(!config||req.headers.origin!==origin)return;
+  onReaderIssued(req:IncomingMessage,res:ServerResponse,payload:unknown,readerCookie:string|undefined){
+   if(!config||!readerCookie||req.headers.origin!==origin)return;
    const reader=(payload as {reader_id?:unknown})?.reader_id;
-   if(typeof reader==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(reader))res.setHeader('Set-Cookie',cookie('news_reader',reader));
+   if(typeof reader==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(reader))res.appendHeader('Set-Cookie',cookie(proofName,reader,readerCookie));
   },
-  async onFeed(req:IncomingMessage,input:unknown,payload:unknown){
+  async onFeed(req:IncomingMessage,payload:unknown){
    if(!config)return;
-   const session=current(req)??current(req,'news_reader'),body=input as {reader_id?:string};
-   if(!session||body.reader_id!==session.readerId)return false;
+   const session=current(req,proofName);
+   if(!session||current(req)?.readerId!==session.readerId)return false;
    type ModelMetadata={model_version?:unknown;features_as_of?:unknown};
    const feed=payload as ModelMetadata & {
     request_id:string;served_at:string;reader_id?:string;
@@ -71,10 +75,9 @@ export function createBehaviorBridge(origin:string,backendUrl:string|undefined,c
     let body;try{body=JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{return reply(400,{error:'INVALID_JSON'});}
     if(!body||typeof body!=='object'||Object.keys(body).join()!=='reader_id'||typeof body.reader_id!=='string')return reply(400,{error:'INVALID_READER'});
     const old=current(req);
-    if(old?.readerId===body.reader_id)return reply(200,{reader_id:body.reader_id});
-    const proof=current(req,'news_reader');
+    const proof=current(req,proofName);
     if(proof?.readerId!==body.reader_id)return reply(403,{error:'READER_PROOF_REQUIRED'});
-    res.setHeader('Set-Cookie',cookie('news_behavior',body.reader_id));
+    if(old?.readerId!==body.reader_id)res.setHeader('Set-Cookie',cookie('news_behavior',body.reader_id));
     return reply(200,{reader_id:body.reader_id});
    }
    if(pathname!=='/api/behavior/events')return reply(404,{error:'NOT_FOUND'});

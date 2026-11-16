@@ -11,14 +11,15 @@ test('event auth failures recover the same session or retain and report the queu
  const token=randomUUID(),received=[];let issued=0;
  const listen=async server=>{server.listen(0,'127.0.0.1');await once(server,'listening');t.after(()=>new Promise(r=>server.close(r)));return `http://127.0.0.1:${server.address().port}`;};
  const logging=await listen(createServer(async(req,res)=>{const chunks=[];for await(const b of req)chunks.push(b);const body=JSON.parse(Buffer.concat(chunks).toString());if(body.events)received.push(...body.events);res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({results:(body.records??body.events).map(r=>({...('event_id' in r?{event_id:r.event_id}:{impression_id:r.impression_id}),status:'accepted'}))}));}));
- const backend=await listen(createServer((req,res)=>{let payload;if(req.url==='/api/user/anonymous')payload={reader_id:`019a0000-0000-7000-8000-${String(++issued).padStart(12,'0')}`};else if(req.url==='/api/category')payload={category_list:[]};else payload={request_id:randomUUID(),served_at:new Date().toISOString(),next_offset:null,items:[{article_id:'a',impression_id:randomUUID(),position:1,title:'세션 복구 시험 기사',paragraphs:['가상 기사'],category:'사회',published_at:new Date().toISOString(),is_synthetic:true,is_liked:false}]};res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify(payload));}));
+ const backend=await listen(createServer((req,res)=>{let payload;if(req.url==='/api/user/anonymous')payload={reader_id:`019a0000-0000-7000-8000-${String(++issued).padStart(12,'0')}`};else if(req.url==='/api/category')payload={category_list:[]};else payload={request_id:randomUUID(),served_at:new Date().toISOString(),next_cursor:null,items:[{article_id:'a',impression_id:randomUUID(),position:1,title:'세션 복구 시험 기사',paragraphs:['가상 기사'],category:'사회',published_at:new Date().toISOString(),is_synthetic:true,is_liked:false}]};if(req.url==='/api/user/anonymous')res.setHeader('Set-Cookie',`news_reader=${payload.reader_id}; Path=/; HttpOnly`);
+  res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify(payload));}));
  const reserve=createServer();reserve.listen(0,'127.0.0.1');await once(reserve,'listening');const port=reserve.address().port;await new Promise(r=>reserve.close(r));const url=`http://127.0.0.1:${port}`;
  const web=createDevServer({root:fileURLToPath(new URL('../../',import.meta.url)),origin:url,backendBaseUrl:backend,logging:{url:logging,token}});web.listen(port,'127.0.0.1');await once(web,'listening');t.after(()=>new Promise(r=>web.close(r)));
  const browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:{})});t.after(()=>browser.close());
  async function fixture(){const context=await browser.newContext();const page=await context.newPage();const sent=[];let sessions=0;
   await page.addInitScript(()=>{globalThis.reports=[];document.addEventListener('behavior-queue-changed',event=>globalThis.reports.push(event.detail));});
   page.on('request',req=>{if(req.url().endsWith('/api/behavior/session'))sessions++;if(req.url().endsWith('/api/behavior/events')){const body=req.postDataJSON();sent.push(...body.events.filter(e=>e.event_type==='article_open'));}});
-  await page.goto(url);await page.locator('a.card').waitFor();const identity=await page.evaluate(()=>localStorage.getItem('sai-news.backend-reader-id'));
+  await page.goto(url);await page.locator('a.card').waitFor();const identity=await page.evaluate(()=>import('/src/behavior-events.js').then(m=>m.behaviorReader()));
   return {context,page,sent,identity,sessions:()=>sessions};
  }
  async function emit(page,count=1){await page.evaluate(async n=>{const m=await import('/src/behavior-events.js');const id=document.querySelector('a.card').dataset.impressionId;for(let i=0;i<n;i++)m.recordBehavior('article_open',id);},count);}
@@ -31,7 +32,7 @@ test('event auth failures recover the same session or retain and report the queu
    const groups=Map.groupBy(f.sent,e=>e.event_id);assert.equal(groups.size,kind==='parallel'?3:1);
    assert(f.sent.length>groups.size);
    for(const [id,attempts] of groups){if(kind!=='parallel')assert(attempts.length>=2);assert(attempts.every(e=>JSON.stringify(e)===JSON.stringify(attempts[0])));assert.equal(received.filter(e=>e.event_id===id).length,1);}
-   assert.equal(f.sessions(),2);assert.equal(issued,before);assert.equal(await f.page.evaluate(()=>localStorage.getItem('sai-news.backend-reader-id')),f.identity);
+   assert.equal(f.sessions(),2);assert.equal(issued,before);assert.equal(await f.page.evaluate(()=>import('/src/behavior-events.js').then(m=>m.behaviorReader())),f.identity);
   }finally{await f.context.close();}
  });
  await t.test('missing reader proof retains events and reports failure without issuing an identity',async()=>{

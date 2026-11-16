@@ -30,15 +30,19 @@ test('real browser click reaches SQLite once, isolated readers and invalid choic
  const feeds=[];
  let serial=0, paginate=false, largeFeed=false;
  const backend=await listen(createServer(async(req,res)=>{
-  const chunks=[];for await(const c of req)chunks.push(c);
-  const body=chunks.length?JSON.parse(Buffer.concat(chunks).toString()):{};
+  const readerId=req.headers.cookie?.split('=')[1];
   let payload;
   if(req.url==='/api/user/anonymous')payload={reader_id:`019a0000-0000-7000-8000-${String(++serial).padStart(12,'0')}`};
   else if(req.url==='/api/category')payload={category_list:['IT·과학','스포츠']};
   else if(req.url==='/api/news/feed'){
    const titles=largeFeed?Array.from({length:101},(_,index)=>`기사 ${index+1}`):['AI 산업 소식','스포츠 경기 결과'];
-   payload={reader_id:body.reader_id,request_id:randomUUID(),served_at:new Date().toISOString(),next_offset:paginate&&!body.offset?2:null,items:titles.map((title,index)=>({article_id:`article-${index}`,impression_id:randomUUID(),position:body.offset+index+1,title,paragraphs:['브라우저 검증용 가상 기사입니다.'],category:index?'스포츠':'IT·과학',published_at:new Date().toISOString(),is_synthetic:true,is_liked:false}))};feeds.push(payload);
+   const chunks=[];
+   for await(const chunk of req)chunks.push(chunk);
+   const {cursor}=JSON.parse(Buffer.concat(chunks).toString('utf8'));
+   const next_cursor=paginate&&!cursor?{article_id:'article-1',published_at:new Date().toISOString(),returned_count:2}:null;
+   payload={reader_id:readerId,request_id:randomUUID(),served_at:new Date().toISOString(),next_cursor,items:titles.map((title,index)=>({article_id:`article-${index}`,impression_id:randomUUID(),position:(cursor?.returned_count??0)+index+1,title,paragraphs:['브라우저 검증용 가상 기사입니다.'],category:index?'스포츠':'IT·과학',published_at:new Date().toISOString(),is_synthetic:true,is_liked:false}))};feeds.push(payload);
   }else{res.writeHead(404);res.end();return;}
+  if(req.url==='/api/user/anonymous')res.setHeader('Set-Cookie',`news_reader=${payload.reader_id}; Path=/; HttpOnly`);
   res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify(payload));
  }));
  // Reserve the port before creating the server's origin-bound routes.
@@ -100,17 +104,19 @@ test('real browser click reaches SQLite once, isolated readers and invalid choic
   assert.equal((await ack).status(),200);
   assert.equal(store.actions().find(row=>row.event_id!==saved.event_id)?.impression_id,firstFeed.items[0].impression_id);
 
-  const requestFeed=readerId=>context.request.post(url+'/api/news/feed',{
-   headers:{Origin:url},data:{reader_id:readerId,offset:0}
+  const requestFeed=cookie=>context.request.post(url+'/api/news/feed',{
+   headers:{Origin:url,...(cookie?{Cookie:cookie}:{})},data:{}
   });
-  const mismatch=await requestFeed(feeds[0].reader_id);
+  const session=(await context.cookies(url)).find(cookie=>cookie.name==='sai_synthetic');
+  assert.ok(session);
+  const mismatch=await requestFeed(`sai_synthetic=${session.value}; news_reader=${feeds[0].reader_id}`);
   assert.equal(mismatch.status(),409);
   assert.deepEqual(await mismatch.json(),{error:'SYNTHETIC_READER_MISMATCH'});
   assert.equal(store.getServed(feeds.at(-1).items[0].impression_id),undefined);
 
   paginate=false;largeFeed=true;
   failSecondBatch=true;
-  const failed=await requestFeed(firstFeed.reader_id);
+  const failed=await requestFeed();
   assert.equal(failed.status(),503);
   assert.deepEqual(await failed.json(),{error:'SYNTHETIC_LOGGING_UNAVAILABLE'});
   const failedFeed=feeds.at(-1);
@@ -118,7 +124,7 @@ test('real browser click reaches SQLite once, isolated readers and invalid choic
   assert.equal(store.getServed(failedFeed.items[100].impression_id),undefined);
 
   failSecondBatch=false;
-  assert.equal((await requestFeed(firstFeed.reader_id)).status(),200);
+  assert.equal((await requestFeed()).status(),200);
   const retriedFeed=feeds.at(-1);
   assert.notEqual(retriedFeed.items[0].impression_id,failedFeed.items[0].impression_id);
   assert.ok(store.getServed(failedFeed.items[0].impression_id));
