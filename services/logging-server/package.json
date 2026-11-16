@@ -1,0 +1,14 @@
+{
+  "name": "news-logging-server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=24.19.0"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "check": "node --check schema.mjs && node --check repository.mjs && node --check http.mjs && node --check exporter.mjs && node --check local-sink.mjs && node --check partition.mjs && node --check main.mjs",
+    "start": "node main.mjs"
+  }
+}

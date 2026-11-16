@@ -11,13 +11,18 @@
     "build": "node scripts/build.mjs",
     "build:local": "tsc && npm run build",
     "prestart": "npm run build:local",
-    "pretest": "npm run build:local"
+    "pretest": "npm run build:local",
+    "agent:browser": "node scripts/browser-click-agent.mjs",
+    "test:browser": "npm run build:local && node --test tests/browser/*.test.mjs",
+    "agent:json": "node --env-file=.env scripts/run-synthetic-experiment.mjs",
+    "preagent:json": "npm run build:local"
   },
   "engines": {
     "node": "24.21.0"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",
+    "playwright": "^1.65.0",
     "typescript": "5.9.3"
   }
 }

@@ -1,6 +1,8 @@
 import type {Article, Feed, FeedItem} from './types.js';
 import {likeButton,seedBackendLikes} from './likes.js';
 import {getBackendPage,getBackendCategories,getBackendSubcategories} from './backend-api.js';
+import {initializeSyntheticEvents,recordSyntheticOpen} from './synthetic-events.js';
+let pendingOpen:{articleId:string;impressionId:string}|null=null;
 const backendArticles=new Map<string, Article>();
 const main=document.querySelector('main')!;
 let feedScrollY=0;
@@ -17,6 +19,12 @@ window.addEventListener('scroll',()=>{
   if(!state.articleId&&!location.hash.startsWith('#article/'))feedScrollY=window.scrollY;
 },{passive:true});
 main.addEventListener('click',event=>{
+  pendingOpen=null;
+  if(event.isTrusted&&event.target instanceof Element&&!state.articleId&&event.button===0&&!event.ctrlKey&&!event.metaKey&&!event.shiftKey){
+    const link=event.target.closest<HTMLAnchorElement>('a[data-article]');
+    const articleId=link?.dataset.article,impressionId=link?.dataset.impression;
+    if(articleId&&impressionId)pendingOpen={articleId,impressionId};
+  }
   if(!state.articleId&&event.target instanceof Element&&event.target.closest('a[data-article]')&&!event.ctrlKey&&!event.metaKey&&!event.shiftKey&&event.button===0)feedScrollY=window.scrollY;
 });
 const state={category:'전체',subcategory:'전체',status:'loading',feed:null as Feed | null,articleId:null as string | null,error:'',request:0};
@@ -25,7 +33,7 @@ const escape=(value: unknown)=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;'
 const date=(value: string)=>new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',month:'long',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(value));
 const art=(article: Article,extra='')=>{let image='';if(article.imageUrl){try{const url=new URL(article.imageUrl,location.href);if(['http:','https:'].includes(url.protocol))image=`<img class="article-photo" src="${escape(url.href)}" alt="" loading="lazy">`;}catch{}}return `<div class="art art-${article.art} ${extra}" aria-hidden="true"><span class="orb"></span><span class="shape"></span><span class="art-word">${escape(article.category==='IT·과학'?'DISCOVER':article.category==='스포츠'?'MOVE':'EVERYDAY')}</span><span class="art-caption">SAI ORIGINAL · ILLUSTRATION</span>${image}</div>`;};
 main.addEventListener('error',event=>{if(event.target instanceof Element&&event.target.matches('.article-photo'))event.target.remove();},true);
-function card(item: FeedItem){const a=item.article;return `<div class="news-row"><a class="card" href="#article/${encodeURIComponent(a.id)}" data-article="${escape(a.id)}">${art(a)}<div class="card-copy"><div class="eyebrow"><span>${escape(a.category)}</span><span class="fiction">${a.synthetic?'가상 기사':'뉴스 기사'}</span></div><h3>${escape(a.title)}</h3><p>${escape(a.summary)}</p><div class="article-date"><span class="publisher">${escape(a.publisher)}</span> · ${date(a.publishedAt)}</div><div class="reason"><span>↗</span> ${escape(item.reason)}</div></div></a>${likeButton(a.id)}</div>`;}
+function card(item: FeedItem){const a=item.article;return `<div class="news-row"><a class="card" href="#article/${encodeURIComponent(a.id)}" data-article="${escape(a.id)}" data-impression="${escape(item.impressionId??'')}">${art(a)}<div class="card-copy"><div class="eyebrow"><span>${escape(a.category)}</span><span class="fiction">${a.synthetic?'가상 기사':'뉴스 기사'}</span></div><h3>${escape(a.title)}</h3><p>${escape(a.summary)}</p><div class="article-date"><span class="publisher">${escape(a.publisher)}</span> · ${date(a.publishedAt)}</div><div class="reason"><span>↗</span> ${escape(item.reason)}</div></div></a>${likeButton(a.id)}</div>`;}
 function render(){
   observer?.disconnect();
   if(state.articleId){renderArticle();return;}
@@ -117,7 +125,9 @@ window.addEventListener('hashchange',()=>{
   state.articleId=articleId;
   render();
   main.focus({preventScroll:true});
+  if(articleId&&pendingOpen?.articleId===articleId&&backendArticles.has(articleId))void recordSyntheticOpen(pendingOpen.impressionId);
+  pendingOpen=null;
   requestAnimationFrame(()=>window.scrollTo({top:state.articleId?0:feedScrollY,left:0,behavior:'instant'}));
 });
 state.articleId=location.hash.startsWith('#article/')?decodeURIComponent(location.hash.slice(9)):null;
-initialize();
+void initializeSyntheticEvents().then(initialize);

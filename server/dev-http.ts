@@ -2,13 +2,17 @@ import http from 'node:http';
 import {readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {createBackendProxy} from './backend-proxy.js';
+import {createSyntheticBridge, type SyntheticConfig} from './synthetic-bridge.js';
 
-// Local development only. No visitor API, cookies or SQLite are initialized.
-export function createDevServer({root,origin,backendBaseUrl}:{root:string;origin:string;backendBaseUrl?:string}) {
-  const proxy=createBackendProxy({baseUrl:backendBaseUrl,origin});
+// Local development only. The optional synthetic bridge uses an in-memory session;
+// visitor APIs and SQLite are not initialized here.
+export function createDevServer({root,origin,backendBaseUrl,synthetic}:{root:string;origin:string;backendBaseUrl?:string;synthetic?:SyntheticConfig}) {
+  const bridge=createSyntheticBridge(origin,synthetic);
+  const proxy=createBackendProxy({baseUrl:backendBaseUrl,origin,onFeed:bridge.onFeed});
   return http.createServer(async(req,res)=>{
     try {
       const pathname=new URL(req.url??'/',origin).pathname;
+      if(await bridge.handle(req,res,pathname))return;
       if(await proxy(req,res,pathname))return;
       if(pathname.startsWith('/images/')) {
         if(req.method!=='GET'&&req.method!=='HEAD'){res.writeHead(405);res.end();return;}
