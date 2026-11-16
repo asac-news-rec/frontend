@@ -11,11 +11,24 @@ import {runBrowserClick} from '../../scripts/browser-click-agent.mjs';
 
 test('real browser click reaches SQLite once, isolated readers and invalid choices stay separate',async t=>{
  const token=randomUUID(),agentToken=randomUUID();
- const {url:loggingUrl,store}=await startFastApiLogging(t,token);
+ const {url:fastApiUrl,store}=await startFastApiLogging(t,token);
  const listen=async server=>{server.listen(0,'127.0.0.1');await once(server,'listening');t.after(()=>new Promise(resolve=>server.close(resolve)));return `http://127.0.0.1:${server.address().port}`;};
+ let failSecondBatch=false;
+ const loggingUrl=await listen(createServer(async(req,res)=>{
+  const chunks=[];for await(const chunk of req)chunks.push(chunk);
+  const body=Buffer.concat(chunks);
+  if(failSecondBatch&&req.url==='/internal/served'&&JSON.parse(body).records[0].position===101){
+   res.writeHead(503,{'Content-Type':'application/json'});
+   res.end(JSON.stringify({error:'INBOX_CAPACITY'}));
+   return;
+  }
+  const headers=Object.fromEntries(Object.entries(req.headers).filter(([name])=>name==='authorization'||name==='content-type'||name.startsWith('x-')));
+  const response=await fetch(fastApiUrl+req.url,{method:req.method,headers,body});
+  res.writeHead(response.status,{'Content-Type':'application/json'});
+  res.end(await response.text());
+ }));
  const feeds=[];
- const getAction=store.getAction.bind(store);
- let serial=0;
+ let serial=0, paginate=false, largeFeed=false;
  const backend=await listen(createServer(async(req,res)=>{
   const chunks=[];for await(const c of req)chunks.push(c);
   const body=chunks.length?JSON.parse(Buffer.concat(chunks).toString()):{};
@@ -23,7 +36,8 @@ test('real browser click reaches SQLite once, isolated readers and invalid choic
   if(req.url==='/api/user/anonymous')payload={reader_id:`019a0000-0000-7000-8000-${String(++serial).padStart(12,'0')}`};
   else if(req.url==='/api/category')payload={category_list:['IT·과학','스포츠']};
   else if(req.url==='/api/news/feed'){
-   payload={reader_id:body.reader_id,request_id:randomUUID(),served_at:new Date().toISOString(),next_offset:null,items:['AI 산업 소식','스포츠 경기 결과'].map((title,index)=>({article_id:`article-${index}`,impression_id:randomUUID(),position:index+1,title,paragraphs:['브라우저 검증용 가상 기사입니다.'],category:index?'스포츠':'IT·과학',published_at:new Date().toISOString(),is_synthetic:true,is_liked:false}))};feeds.push(payload);
+   const titles=largeFeed?Array.from({length:101},(_,index)=>`기사 ${index+1}`):['AI 산업 소식','스포츠 경기 결과'];
+   payload={reader_id:body.reader_id,request_id:randomUUID(),served_at:new Date().toISOString(),next_offset:paginate&&!body.offset?2:null,items:titles.map((title,index)=>({article_id:`article-${index}`,impression_id:randomUUID(),position:body.offset+index+1,title,paragraphs:['브라우저 검증용 가상 기사입니다.'],category:index?'스포츠':'IT·과학',published_at:new Date().toISOString(),is_synthetic:true,is_liked:false}))};feeds.push(payload);
   }else{res.writeHead(404);res.end();return;}
   res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify(payload));
  }));
@@ -39,9 +53,10 @@ test('real browser click reaches SQLite once, isolated readers and invalid choic
  assert.equal((await fetch(url+'/api/synthetic/session',{method:'POST'})).status,401);
  assert.equal((await fetch(url+'/api/synthetic/events',{method:'POST',headers:{Origin:url,'Content-Type':'application/json'},body:'{}'})).status,403);
  assert.deepEqual(await run(async context=>{assert.equal(context.articles[0].title,'AI 산업 소식');return {article_id:context.articles[0].article_id};}),{status:'clicked',candidates:2,accepted:true});
- const events=store.actions().map(row=>JSON.parse(row.canonical_json));
- assert.equal(events.length,1);
- const saved=getAction(events[0].event_id);
+ const actions=store.actions();
+ assert.equal(actions.length,1);
+ const saved=actions[0];
+ const event=JSON.parse(saved.canonical_json);
  assert.equal(saved.source,'simulator');assert.equal(saved.event_type,'article_open');
  const served=store.getServed(saved.impression_id);
  assert.equal(served.article_id,'article-0');assert.equal(served.reader_id,feeds[0].reader_id);
@@ -50,7 +65,7 @@ test('real browser click reaches SQLite once, isolated readers and invalid choic
  assert.equal(store.actions().length,1);assert.equal(new Set(feeds.map(f=>f.reader_id)).size,3);
  assert.equal(store.counts().actions,1);
  // Re-delivery of the exact same click remains one SQLite row.
- const duplicate=await store.intakeActions({readerId:served.reader_id,collectionEnabled:true,source:'simulator'},{events:[events[0]]});
+ const duplicate=await store.intakeActions({readerId:served.reader_id,collectionEnabled:true,source:'simulator'},{events:[event]});
  assert.equal(duplicate.results[0].status,'duplicate');assert.equal(store.counts().actions,1);
  const before=store.counts();
  const ordinary=await browser.newContext();
@@ -60,4 +75,47 @@ test('real browser click reaches SQLite once, isolated readers and invalid choic
   await page.locator('article.article-page h1').waitFor();
   assert.deepEqual(store.counts(),before);
  }finally{await ordinary.close();}
+
+ paginate=true;
+ const context=await browser.newContext();
+ try{
+  await context.request.post(url+'/api/synthetic/session',{headers:{'x-synthetic-agent':agentToken}});
+  const page=await context.newPage();
+  await page.addInitScript(()=>{window.IntersectionObserver=undefined;});
+  await page.goto(url);
+  await page.locator('a[data-article]').first().waitFor();
+  const firstFeed=feeds.at(-1);
+  await page.locator('#more').click();
+  await page.getByText('모든 기사를 확인했어요.').waitFor();
+  const nextFeed=feeds.at(-1);
+  assert.notEqual(firstFeed.items[0].impression_id,nextFeed.items[0].impression_id);
+  const ack=page.waitForResponse(response=>response.url().endsWith('/api/synthetic/events'));
+  await page.locator('a[data-article="article-0"]').click();
+  assert.equal((await ack).status(),200);
+  assert.equal(store.actions().find(row=>row.event_id!==saved.event_id)?.impression_id,firstFeed.items[0].impression_id);
+
+  const requestFeed=readerId=>context.request.post(url+'/api/news/feed',{
+   headers:{Origin:url},data:{reader_id:readerId,offset:0}
+  });
+  const mismatch=await requestFeed(feeds[0].reader_id);
+  assert.equal(mismatch.status(),409);
+  assert.deepEqual(await mismatch.json(),{error:'SYNTHETIC_READER_MISMATCH'});
+  assert.equal(store.getServed(feeds.at(-1).items[0].impression_id),undefined);
+
+  paginate=false;largeFeed=true;
+  failSecondBatch=true;
+  const failed=await requestFeed(firstFeed.reader_id);
+  assert.equal(failed.status(),503);
+  assert.deepEqual(await failed.json(),{error:'SYNTHETIC_LOGGING_UNAVAILABLE'});
+  const failedFeed=feeds.at(-1);
+  assert.ok(failedFeed.items.slice(0,100).every(item=>store.getServed(item.impression_id)));
+  assert.equal(store.getServed(failedFeed.items[100].impression_id),undefined);
+
+  failSecondBatch=false;
+  assert.equal((await requestFeed(firstFeed.reader_id)).status(),200);
+  const retriedFeed=feeds.at(-1);
+  assert.notEqual(retriedFeed.items[0].impression_id,failedFeed.items[0].impression_id);
+  assert.ok(store.getServed(failedFeed.items[0].impression_id));
+  assert.ok(retriedFeed.items.every(item=>store.getServed(item.impression_id)));
+ }finally{await context.close();}
 });

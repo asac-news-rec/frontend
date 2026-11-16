@@ -8,6 +8,10 @@
 
 ## 배포 파일
 
+GitHub Actions의 `Frontend CI`는 `main` 대상 PR과 `main`에 반영된 커밋에서 설치·검사·테스트·빌드를 실행합니다. `main` 빌드가 성공하면 Actions 실행 페이지에서 `frontend-dist-<커밋 SHA>` 결과물을 내려받을 수 있습니다. SHA는 해당 실행이 체크아웃한 `main`의 push 커밋입니다. Squash merge 직후에는 생성된 squash 커밋의 SHA입니다. 배포할 커밋의 Actions 실행에서 결과물을 내려받습니다. 결과물은 업로드 후 90일간 보관됩니다. 만료된 경우 같은 커밋을 체크아웃해 아래 명령으로 다시 빌드합니다.
+
+로컬과 CI의 Node.js 기준은 `package.json`의 `engines.node`입니다. Node.js를 올릴 때 `package.json`, `package-lock.json`, Dockerfile의 Node 베이스 이미지와 실행 안내를 함께 갱신합니다.
+
 1. 프론트에서 `npm ci`, `npm run check`, `npm test`, `npm run build`를 실행합니다.
 2. 배포 담당자가 기존 백엔드 `web/` 화면을 백업합니다.
 3. `dist/` 안의 `index.html`과 `src/` 디렉토리를 백엔드 `web/` 안에 배치합니다. 결과는 `web/index.html`, `web/src/app.js`, `web/src/style.css`입니다. `web/dist/`로 복사하지 않습니다.

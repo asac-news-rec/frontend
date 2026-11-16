@@ -8,7 +8,7 @@
 
 ## 로컬 실행
 
-Node.js 24.19.0 이상이 필요합니다. 백엔드 저장소 안내에 따라 PostgreSQL·API·Nginx를 먼저 실행합니다. 백엔드 Nginx는 기본 http://127.0.0.1:8080/ 입니다.
+Node.js 24.21.0이 필요합니다. 백엔드 저장소 안내에 따라 PostgreSQL·API·Nginx를 먼저 실행합니다. 백엔드 Nginx는 기본 http://127.0.0.1:8080/ 입니다.
 
 ```powershell
 npm ci

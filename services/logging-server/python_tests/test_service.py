@@ -106,7 +106,19 @@ def test_file_atomic_commit_duplicate_and_conflict(client):
     assert upload(client, [new], count=2).status_code == 400
     assert upload(client, [new], request="wrong").status_code == 400
     assert upload(client, [new, new]).status_code == 400
-    assert upload(client, [new]).status_code == 200
+    mixed = upload(client, [row, new])
+    assert mixed.status_code == 200
+    assert [result["status"] for result in mixed.json()["results"]] == ["duplicate", "accepted"]
+    assert client.get("/ready").json()["served"] == 2
+
+
+def test_revoked_row_rolls_back_whole_file(client):
+    assert client.post("/internal/delete-user", json={"reader_id": "reader-2"}).status_code == 200
+    revoked = {**record(), "reader_id": "reader-2", "impression_id": "imp-2"}
+    response = upload(client, [record(), revoked])
+    assert response.status_code == 403
+    assert response.json() == {"error": "USER_REVOKED"}
+    assert client.get("/ready").json()["served"] == 0
 
 
 def test_served_model_metadata_is_exported(client, config):
@@ -157,6 +169,26 @@ def test_body_timeout_before_request_reaches_app(monkeypatch):
     asyncio.run(BodyLimit(app)({"type": "http", "method": "POST"}, receive, send))
     assert sent[0]["status"] == 408
     assert json.loads(sent[1]["body"]) == {"error": "BODY_TIMEOUT"}
+
+
+@pytest.mark.parametrize("headers", [[(b"content-length", b"262145")], [], [(b"content-length", b"1")]])
+def test_oversized_body_before_request_reaches_app(headers):
+    sent, reads = [], []
+
+    async def app(scope, receive, send):
+        pytest.fail("oversized body reached the application")
+
+    async def receive():
+        reads.append(True)
+        return {"type": "http.request", "body": b"x" * 262145, "more_body": False}
+
+    async def send(message):
+        sent.append(message)
+
+    asyncio.run(BodyLimit(app)({"type": "http", "method": "POST", "headers": headers}, receive, send))
+    assert len(reads) == (0 if headers and headers[0][1] == b"262145" else 1)
+    assert sent[0]["status"] == 413
+    assert json.loads(sent[1]["body"]) == {"error": "BODY_TOO_LARGE"}
 
 
 def test_intake_completes_while_export_sink_is_blocked(client, monkeypatch):
@@ -287,16 +319,31 @@ def test_deletion_failure_keeps_tombstone(tmp_path, monkeypatch):
     exporter = Exporter(store, sink)
     store.intake_served({"records": [record()]})
     exporter.flush()
+    jobs = store.jobs(True)
+    assert jobs == []
+    files = [path for path in sink.root.rglob("*") if path.is_file()]
+    assert len(files) == 2
     original = sink.remove
-    monkeypatch.setattr(sink, "remove", lambda name: (_ for _ in ()).throw(OSError("disk error")))
+
+    def fail_manifest(name):
+        if name.startswith("manifests/"):
+            raise OSError("disk error")
+        original(name)
+
+    monkeypatch.setattr(sink, "remove", fail_manifest)
     with pytest.raises(OSError):
         exporter.delete("reader-1")
+    assert sum(path.exists() for path in files) == 1
+    store.close()
+
+    store = Store(tmp_path / "db.sqlite")
+    exporter = Exporter(store, LocalSink(sink.root))
     with pytest.raises(InputError, match="USER_REVOKED"):
         store.intake_actions({"events": [event()]}, "reader-1", True)
     assert exporter.flush(True) == 0
-    monkeypatch.setattr(sink, "remove", original)
     exporter.delete("reader-1")
     assert store.counts() == {"served": 0, "actions": 0}
+    assert not any(path.exists() for path in files)
     store.close()
 
 

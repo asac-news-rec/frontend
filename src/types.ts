@@ -25,6 +25,7 @@ export interface FeedItem {
   article: Article;
   rank: number;
   reason: string;
+  impressionId?: string;
   isLiked?: boolean;
 }
 

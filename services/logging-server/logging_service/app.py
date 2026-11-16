@@ -109,6 +109,13 @@ class BodyLimit:
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http" or scope["method"] != "POST":
             return await self.app(scope, receive, send)
+        max_length = str(MAX_BODY).encode("ascii")
+        for name, value in scope.get("headers", ()):
+            if name == b"content-length" and value.isdigit():
+                length = value.lstrip(b"0")
+                if (len(length), length) > (len(max_length), max_length):
+                    response = JSONResponse({"error": "BODY_TOO_LARGE"}, status_code=413)
+                    return await response(scope, receive, send)
         # Bound the actual streamed body, including multipart overhead, before parsing.
         chunks, total = [], 0
         try:

@@ -107,17 +107,19 @@ GCP의 정적 프런트엔드는 기존 Nginx를 유지합니다. 같은 출처 
 
 ## 수신 API
 
-POST 본문은 헤더 수신 후 15초 안에 읽습니다. 초과하면 408 BODY_TIMEOUT을 반환합니다. 헤더 수신 제한은 배포 프록시에서 설정합니다. SQLite 모드에서는 커밋 후 내보내기 알림이 실패해도 ACK를 반환하며, 주기 실행에서 저장된 행을 처리합니다.
+POST의 `Content-Length`가 256KiB를 초과하면 본문을 읽기 전에 413을 반환합니다. 실제로 읽은 바이트에도 같은 상한을 적용하며, 헤더 수신 후 15초 안에 본문 읽기가 끝나지 않으면 408 BODY_TIMEOUT을 반환합니다. 본문을 수신한 뒤 라우트에서 인증하므로 로깅 포트는 내부에 두고, 외부에서 접근 가능한 프록시를 붙이는 경우 헤더 수신 시간과 본문 크기를 프록시에서도 제한합니다. 수신 서버의 본문 상한과 읽기 시간 제한은 프록시 설정과 독립적으로 적용됩니다. SQLite 모드에서는 커밋 후 내보내기 알림이 실패해도 ACK를 반환하며, 주기 실행에서 저장된 행을 처리합니다.
 
 문서 `/docs`, 생존 `/health`, 인증된 상태 `/ready`를 제공합니다. 내부 API는 Bearer 키가 필요합니다.
 
 - POST /internal/served: `{records:[...]}`
 - POST /events: `{events:[...]}`와 검증된 x-news-reader, x-collection-enabled:true, x-news-source:browser|simulator
 - POST /internal/served-file: file(JSONL), request_id, expected_item_count multipart. 전체 검증·원자 커밋 후에만 200
-
-두 served 경로 모두 추천 메타데이터 `score`(유한 JSON 숫자 또는 fallback의 null), `model_version`(문자열 또는 null), `features_as_of`(시간대가 있는 ISO 8601 문자열 또는 null)를 선택적으로 받습니다. 기존 필드만 있는 레코드도 수락합니다. 전달된 값과 명시적 null은 원본 저장 JSON과 내보내기 JSONL에 보존합니다. 프록시는 기사별 점수를 전달하고, 모델 버전과 피처 기준 시각은 기사별 값이 없을 때 피드 공통 값을 사용합니다. 백엔드가 생략한 값은 생략합니다.
 - POST /internal/flush: PostgreSQL에서는 202로 Airflow 모드를 알림. 즉시 실행은 구간을 지정한 DAG 수동 실행
 - POST /internal/delete-user: `{reader_id:string}`. 철회 후 GCS 원본·manifest·DB 삭제. 읽기·삭제 권한 필요
+
+전송기는 200에서 대기 파일을 지웁니다. 503 `INBOX_CAPACITY`는 파일을 유지하고 `Retry-After`에 맞춰 재시도할 응답입니다. 잘못된 형식이나 ID 충돌은 격리하고, 403 `USER_REVOKED`는 해당 독자의 전송 및 자동 재시도를 중단해야 합니다. 401은 인증 설정을 바로잡고 413은 배치 크기를 조정해야 합니다. 확인한 백엔드 전송기는 400·422만 격리하고 나머지 실패는 다음 주기에 재시도하므로, 403 분기와 `Retry-After` 적용은 백엔드 후속 작업입니다.
+
+두 served 경로 모두 추천 메타데이터 `score`(유한 JSON 숫자 또는 fallback의 null), `model_version`(문자열 또는 null), `features_as_of`(시간대가 있는 ISO 8601 문자열 또는 null)를 선택적으로 받습니다. 기존 필드만 있는 레코드도 수락합니다. 전달된 값과 명시적 null은 원본 저장 JSON과 내보내기 JSONL에 보존합니다. 프록시는 기사별 점수를 전달하고, 모델 버전과 피처 기준 시각은 기사별 값이 없을 때 피드 공통 값을 사용합니다. 백엔드가 생략한 값은 생략합니다.
 
 JSON ACK는 accepted/duplicate/rejected/retryable을 유지합니다. accepted는 PostgreSQL 커밋이며 GCS 저장 완료가 아닙니다. 본문 전체 256KiB, 배치 1~100행, 행동 4KiB입니다. event_time/served_at은 과거24시간~미래5분 이내입니다. HTTP 400/401/403/413/415/503과 개별 rejected를 구분합니다. 본문에 reader_id/source를 넣어 신뢰 문맥을 우회할 수 없습니다.
 

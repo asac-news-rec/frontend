@@ -3,7 +3,7 @@ import {likeButton,seedBackendLikes} from './likes.js';
 import {getBackendPage,getBackendCategories,getBackendSubcategories} from './backend-api.js';
 import {initializeSyntheticEvents,recordSyntheticOpen} from './synthetic-events.js';
 import {initializeBehavior,connectBehavior} from './behavior-events.js';
-let pendingOpen:string|null=null;
+let pendingOpen:{articleId:string;impressionId:string}|null=null;
 const backendArticles=new Map<string, Article>();
 const main=document.querySelector('main')!;
 const behavior=connectBehavior(main);
@@ -23,7 +23,9 @@ window.addEventListener('scroll',()=>{
 main.addEventListener('click',event=>{
   pendingOpen=null;
   if(event.isTrusted&&event.target instanceof Element&&!state.articleId&&event.button===0&&!event.ctrlKey&&!event.metaKey&&!event.shiftKey){
-    pendingOpen=event.target.closest<HTMLAnchorElement>('a[data-article]')?.dataset.article??null;
+    const link=event.target.closest<HTMLAnchorElement>('a[data-article]');
+    const articleId=link?.dataset.article,impressionId=link?.dataset.impressionId;
+    if(articleId&&impressionId)pendingOpen={articleId,impressionId};
   }
   if(!state.articleId&&event.target instanceof Element&&event.target.closest('a[data-article]')&&!event.ctrlKey&&!event.metaKey&&!event.shiftKey&&event.button===0)feedScrollY=window.scrollY;
 });
@@ -126,7 +128,7 @@ window.addEventListener('hashchange',()=>{
   state.articleId=articleId;
   render();
   main.focus({preventScroll:true});
-  if(articleId&&pendingOpen===articleId&&backendArticles.has(articleId))void recordSyntheticOpen(articleId);
+  if(articleId&&pendingOpen?.articleId===articleId&&backendArticles.has(articleId))void recordSyntheticOpen(pendingOpen.impressionId);
   pendingOpen=null;
   requestAnimationFrame(()=>window.scrollTo({top:state.articleId?0:feedScrollY,left:0,behavior:'instant'}));
 });

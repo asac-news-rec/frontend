@@ -14,7 +14,21 @@
 
 `reader_id`는 가상 독자 식별자다. `article_id`는 입력 목록의 기사 식별자다. `request_id`는 한 목록 제공의 식별자, `impression_id`는 제공된 기사별 식별자, `event_id`는 클릭의 UUID다. `served_at`과 `event_time`은 UTC다. 재시도 큐는 아직 없으며 요청 실패 시 실행을 중단한다. 모델 선택은 실제 독자의 클릭이나 체류 시간을 측정하지 않는다. 로컬 로깅 서버 계약에는 체류 시간 이벤트가 없으므로 이번 스크립트는 체류를 만들지 않는다.
 
-## 실행
+## 로깅 서버 없이 JSON 실험
+
+루트 `.env`의 `OPENROUTER_API_KEY`를 설정한 뒤 `npm run agent:json`을 실행합니다. 사전 빌드 후 가상 독자 5명과 시연 기사 8건으로 각각 실제 모델 선택을 한 번 수행합니다. 뉴스 백엔드·브라우저·로깅 서버는 필요하지 않습니다. `OPENROUTER_MODEL`로 모델을 지정할 수 있으며 기본값은 기존 합성 에이전트와 같습니다.
+
+```powershell
+npm run agent:json
+# 결과 경로를 지정할 때 (기존 파일은 덮어쓰지 않음)
+npm run agent:json -- --output data/my-experiment.json
+```
+
+결과는 기본 `data/synthetic-experiment-<UTC시각>.json`에 저장합니다. 파일에는 실행 ID, 모델, 페르소나, 후보 기사, 선택한 기사 ID, 제공 기록과 합성 이벤트가 들어갑니다. `browser_used:false`, `logging_server_used:false`이므로 실제 브라우저 클릭이나 서버 수락 기록으로 해석하지 않습니다. 클릭하지 않는 선택은 `selected_article_id:null`, 이벤트 빈 배열로 남깁니다. 진행 중 결과도 저장하며 `completed:true`인 경우에만 전체 완료입니다. 실행이 실패하면 이미 완료된 독자 결과를 보존하고 종료 코드 1을 반환합니다. 인증 키와 토큰은 저장하지 않습니다.
+
+현재 입력은 실제 수집 기사가 아닌 프런트 시연 데이터이며 반복 실행 결과가 달라질 수 있습니다. 결과 `data/`는 Git 추적에서 제외됩니다.
+
+## 직접 전송 에이전트 실행
 
 `examples/synthetic-personas.json`에는 서로 다른 관심사의 가상 독자 5명이 있다. 관심사 이름은 현재 **프런트엔드 시연 데이터**의 IT·과학, 스포츠, 문화, 사회, 생활을 기준으로 했다. 백엔드 DB의 `exports/news_articles.dump`는 이 작업 환경에서 읽을 수 없어 DB 카테고리와 일치한다고 확인하지 못했다. `scripts/make-synthetic-contexts.mjs`는 이 페르소나와 프런트엔드의 가상 기사 8건을 결합해 실행 입력을 만든다. 이 데이터는 로컬 경로 검증용이며 실제 수집 기사나 백엔드 DB의 기사 ID가 아니다.
 
@@ -41,6 +55,10 @@ node scripts/synthetic-logging-agent.mjs --contexts contexts.json
 이 모드의 독자 ID는 페르소나 파일의 `reader_id`를 주입하는 대신 실제 화면이 `/api/user/anonymous`로 발급받은 UUID7을 사용합니다. 페르소나 파일의 ID는 모델 입력 문맥입니다. 실행마다 새 컨텍스트·새 독자이며 재방문 ID 유지와 페르소나별 영속 매핑은 아직 없습니다. Nemotron 데이터, 여러 기사 반복 탐색, 체류·스크롤·자동 재시도도 이번 범위에 없습니다.
 
 로컬 개발 서버는 가상 세션의 피드 응답 메타데이터를 `/internal/served`에 먼저 등록한 뒤 화면에 반환합니다. 프런트는 실제 목록 링크 클릭으로 상세 화면이 열릴 때만 이벤트를 `/api/synthetic/events`로 보내며 서버는 세션에 연결된 독자 ID와 `source=simulator`로 전달합니다. 내부 로깅 토큰은 서버 환경에만 있습니다. 기존 직접 전송 스크립트는 병행 실행하지 않습니다. ACK의 accepted는 SQLite 수락이며 GCS 전송 완료가 아닙니다.
+
+제공 기록은 최대 100건씩 저장합니다. 후속 배치가 실패하면 가상 피드 요청은 `503 SYNTHETIC_LOGGING_UNAVAILABLE`로 실패하고, 앞에서 커밋한 제공 기록은 남습니다. 백엔드가 재요청에 새 `impression_id`를 주면 새 기록으로 저장합니다. 같은 ID와 같은 내용은 중복으로 수락하고, 같은 ID에 내용이 달라지면 충돌로 거절합니다. 제공 기록만으로 실제 화면 노출을 판정하지 않습니다.
+
+클릭은 화면에 남아 있는 링크의 `impression_id`를 사용합니다. 다음 페이지가 같은 기사를 반환하더라도 기존 링크에 연결된 제공 위치가 바뀌지 않습니다. 첫 요청에서 가상 세션에 연결된 독자와 다른 독자로 피드를 요청하면 `409 SYNTHETIC_READER_MISMATCH`를 반환합니다. 첫 화면에서는 재시도 버튼이 있는 오류가 표시되고, 다음 페이지 요청에서는 기존 목록에 재시도 버튼이 표시됩니다. 여러 가상 독자는 러너가 매 실행마다 만드는 새 Playwright 컨텍스트에서 실행합니다. 세션 쿠키와 브라우저 저장소는 컨텍스트마다 분리됩니다.
 
 ### 실행
 
