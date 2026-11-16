@@ -1,5 +1,6 @@
 import {randomUUID,timingSafeEqual} from 'node:crypto';
 import type {IncomingMessage,ServerResponse} from 'node:http';
+import type {FeedRejection} from './backend-proxy.js';
 
 export interface SyntheticConfig {agentToken:string;loggingToken:string;loggingUrl:string}
 interface Session {expires:number;readerId?:string}
@@ -21,15 +22,19 @@ export function createSyntheticBridge(origin:string,config?:SyntheticConfig){
   return ack;
  };
  return {
-  async onFeed(req:IncomingMessage,input:unknown,payload:unknown){
+  async onFeed(req:IncomingMessage,input:unknown,payload:unknown):Promise<void|FeedRejection>{
    const current=session(req);if(!config||!current)return;
    const body=input as {reader_id:string};
    const feed=payload as {reader_id?:string;request_id:string;served_at:string;items:{article_id:string;impression_id:string;position:number}[]};
-   if(typeof body.reader_id!=='string'||(current.readerId&&current.readerId!==body.reader_id)||(feed.reader_id!==undefined&&feed.reader_id!==body.reader_id))throw new Error('SYNTHETIC_READER_MISMATCH');
+   if(typeof body?.reader_id!=='string'||(current.readerId&&current.readerId!==body.reader_id)||(feed.reader_id!==undefined&&feed.reader_id!==body.reader_id))return {status:409,error:'SYNTHETIC_READER_MISMATCH'};
    current.readerId=body.reader_id;
    const records=feed.items.map(item=>({request_id:feed.request_id,served_at:feed.served_at,reader_id:body.reader_id,article_id:item.article_id,impression_id:item.impression_id,position:item.position}));
    // Served is committed before the browser sees the list, including paginated lists.
-   for(let start=0;start<records.length;start+=100)await send('/internal/served',{records:records.slice(start,start+100)});
+   try{
+    for(let start=0;start<records.length;start+=100)await send('/internal/served',{records:records.slice(start,start+100)});
+   }catch{
+    return {status:503,error:'SYNTHETIC_LOGGING_UNAVAILABLE'};
+   }
   },
   async handle(req:IncomingMessage,res:ServerResponse,pathname:string){
    if(!pathname.startsWith('/api/synthetic/'))return false;
