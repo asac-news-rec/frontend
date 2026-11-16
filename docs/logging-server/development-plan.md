@@ -255,3 +255,7 @@ GCS adapter·클라우드 배포·Airflow/BQ 작업은 구현하지 않았다. �
 ## reader_id 명칭 적용
 
 현재 HTTP 요청·DB schema v4·내부 readerId 문맥은 reader_id 기준으로 통일했다. 이전 DB는 시작 시 컬럼과 중복 판정용 반환 JSON·해시를 이전한다. 이미 준비한 내보내기 작업은 복구를 위해 원래 파일 내용을 유지한다. 세부사항은 services/logging-server/README.md를 따른다.
+
+## 2026-11-10 FastAPI 전환
+
+현재 실행 진입점은 `services/logging-server/logging_service`의 독립 FastAPI 서비스입니다. 기존 Node 진입점은 Python 실행 호환기로 바뀌었습니다. SQLite schema v5·영속 ACK·중복 판정·5분 JSONL·manifest·복구·삭제를 유지합니다. 백엔드 파일 전송용 `/internal/served-file`은 multipart 전체 원자 수락을 지원합니다. 백엔드 전송기 인증 헤더 연결은 별도 담당자 변경이 필요하며 운영 통합 완료를 의미하지 않습니다. 위의 Node 설계·단계 기록은 개발 당시의 이력입니다. 최신 실행·검증·마이그레이션은 [서비스 README](../../services/logging-server/README.md)를 따릅니다.

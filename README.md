@@ -80,3 +80,7 @@ git diff --check
 ```
 
 테스트는 실제 외부 백엔드 없이 시험용 HTTP 백엔드로 API 전달을 검증합니다. 운영 Nginx 연결과 실제 GCP 기동은 배포 환경에서 별도 검증해야 합니다.
+
+## FastAPI 로깅 서비스
+
+별도 로깅 서버는 Python FastAPI로 실행합니다. JSON 수신·영속 ACK와 백엔드 JSONL 파일 업로드 계약, 기존 DB 이전, 실행·검증 명령은 [로깅 서비스 안내](services/logging-server/README.md)를 참고하세요. 프런트엔드 화면·정적 배포 방식은 그대로 유지합니다.

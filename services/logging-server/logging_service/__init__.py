@@ -1,0 +1,1 @@
+"""Independent FastAPI logging service."""
