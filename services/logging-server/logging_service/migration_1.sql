@@ -17,4 +17,3 @@
     ) STRICT;
     CREATE INDEX actions_impression ON action_records(impression_id);
     PRAGMA user_version=1;
-   

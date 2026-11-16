@@ -14,4 +14,3 @@
     ALTER TABLE action_records_v5 RENAME TO action_records;
     CREATE INDEX actions_impression ON action_records(impression_id);
     PRAGMA user_version=5;
-   

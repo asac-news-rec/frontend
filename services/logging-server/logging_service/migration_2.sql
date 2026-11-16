@@ -3,4 +3,3 @@
    CREATE TABLE export_members(stream TEXT NOT NULL,record_id TEXT NOT NULL,job_id TEXT NOT NULL REFERENCES export_jobs(job_id),PRIMARY KEY(stream,record_id));
    CREATE TABLE revoked_users(user_id TEXT PRIMARY KEY,revoked_at TEXT NOT NULL);
    PRAGMA user_version=2;
-  
