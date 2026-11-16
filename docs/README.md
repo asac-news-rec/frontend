@@ -5,6 +5,7 @@
 | 폴더 | 내용 |
 |---|---|
 | [meetings/2026-11-05-매니저](meetings/2026-11-05-매니저/합성-로그-멘토링-메모.md) | 11월 5일 멘토 미팅용 합성 로그 현황·질문·결정표와 흐름 슬라이드 |
+| [멘토링 작업 정리 양식](meetings/mentoring-work-report.md) | 화·목·금 집계 구간과 제출용 양식 |
 | [meetings/2026-11-03](meetings/2026-11-03/frontend-interface-review-2026-11-03-readable.html) | 화요일 멘토 검토 자료. 읽기용 HTML과 원본 Markdown |
 | [meetings/2026-10-31](meetings/2026-10-31/README.md) | 기존 멘토링 계획·백로그·근거 자료와 백엔드 논의 원본 |
 | [behavior-collection](behavior-collection/behavior-collection-overview.md) | 행동 수집 설명·프론트엔드 명세·모의 화면 |
