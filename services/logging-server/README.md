@@ -107,6 +107,8 @@ GCP의 정적 프런트엔드는 기존 Nginx를 유지합니다. 같은 출처 
 
 ## 수신 API
 
+POST 본문은 헤더 수신 후 15초 안에 읽습니다. 초과하면 408 BODY_TIMEOUT을 반환합니다. 헤더 수신 제한은 배포 프록시에서 설정합니다. SQLite 모드에서는 커밋 후 내보내기 알림이 실패해도 ACK를 반환하며, 주기 실행에서 저장된 행을 처리합니다.
+
 문서 `/docs`, 생존 `/health`, 인증된 상태 `/ready`를 제공합니다. 내부 API는 Bearer 키가 필요합니다.
 
 - POST /internal/served: `{records:[...]}`

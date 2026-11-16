@@ -1,16 +1,19 @@
+import asyncio
 import json
 import shutil
 import sqlite3
 import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from pathlib import Path
+from threading import Event
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
 
-from logging_service.app import ServiceLock, Settings, create_app
+from logging_service.app import BodyLimit, ServiceLock, Settings, create_app
 from logging_service.exporter import Exporter, LocalSink
 from logging_service.schema import InputError, canonical, iso
 from logging_service.store import Store, partition
@@ -126,6 +129,84 @@ def test_served_model_metadata_is_exported(client, config):
                 for row in map(json.loads, file.read_text(encoding="utf-8").splitlines())}
     assert {key: exported["imp-1"][key] for key in metadata} == metadata
     assert all(exported["imp-2"][key] is None for key in metadata)
+
+
+def test_file_ack_survives_export_notification_failure(client, monkeypatch):
+    def unavailable():
+        raise sqlite3.OperationalError("busy")
+
+    monkeypatch.setattr(client.app.state.store, "readiness", unavailable)
+    row = record()
+    assert upload(client, [row]).json()["results"][0]["status"] == "accepted"
+    assert upload(client, [row]).json()["results"][0]["status"] == "duplicate"
+
+
+def test_body_timeout_before_request_reaches_app(monkeypatch):
+    monkeypatch.setattr("logging_service.app.BODY_TIMEOUT_SECONDS", .01)
+    sent = []
+
+    async def app(scope, receive, send):
+        pytest.fail("incomplete body reached the application")
+
+    async def receive():
+        await asyncio.sleep(1)
+
+    async def send(message):
+        sent.append(message)
+
+    asyncio.run(BodyLimit(app)({"type": "http", "method": "POST"}, receive, send))
+    assert sent[0]["status"] == 408
+    assert json.loads(sent[1]["body"]) == {"error": "BODY_TIMEOUT"}
+
+
+def test_intake_completes_while_export_sink_is_blocked(client, monkeypatch):
+    accept(client)
+    exporter = client.app.state.exporter
+    put = exporter.sink.put
+    writing, release = Event(), Event()
+
+    def slow_put(name, content):
+        writing.set()
+        assert release.wait(5)
+        put(name, content)
+
+    monkeypatch.setattr(exporter.sink, "put", slow_put)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        flush = pool.submit(exporter.flush)
+        try:
+            assert writing.wait(3)
+            response = pool.submit(send, client, [event()]).result(timeout=2)
+            assert response.json()["results"][0]["status"] == "accepted"
+        finally:
+            release.set()
+        assert flush.result(timeout=3) == 1
+
+
+def test_export_continues_if_error_cannot_be_saved(tmp_path, monkeypatch):
+    with closing(Store(":memory:")) as store:
+        store.intake_served({"records": [record()]})
+        store.intake_actions({"events": [event()]}, "reader-1", True)
+        exporter = Exporter(store, LocalSink(tmp_path))
+        put, mark = exporter.sink.put, store.mark
+        attempted = []
+
+        def fail_first_write(name, content):
+            attempted.append(name)
+            if len(attempted) == 1:
+                raise OSError("write failed")
+            put(name, content)
+
+        def mark_success_only(job, error=None, receipt=None):
+            if error:
+                raise sqlite3.OperationalError("busy")
+            mark(job, receipt=receipt)
+
+        monkeypatch.setattr(exporter.sink, "put", fail_first_write)
+        monkeypatch.setattr(store, "mark", mark_success_only)
+        assert exporter.flush() == 1
+        assert exporter.state["lastError"] == "OSError; mark: OperationalError"
+        assert exporter.flush() == 1
+        assert exporter.state["lastError"] is None
 
 
 def test_capacity_batch_does_not_overfill(config):
