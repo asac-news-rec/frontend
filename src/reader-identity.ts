@@ -25,4 +25,3 @@ export async function getBackendReaderId({storage=globalThis.window?.localStorag
  };
  return locks?locks.request('sai-news-backend-reader',readOrCreate):readOrCreate();
 }
-
