@@ -149,14 +149,16 @@ class Store:
     def counts(self):
         return {name: self.db.execute(f"SELECT count(*) FROM {table}").fetchone()[0] for name, table in [("served", "served_records"), ("actions", "action_records")]}
 
-    def prepare_exports(self):
+    def prepare_exports(self, interval=None, interval_path=None):
         with self.transaction():
-            rows = self.db.execute("SELECT s.*, 'served' AS stream, impression_id AS record_id, served_at AS time FROM served_records s WHERE NOT EXISTS(SELECT 1 FROM export_members m WHERE m.stream='served' AND m.record_id=s.impression_id) ORDER BY impression_id").fetchall()
-            rows += self.db.execute("SELECT a.*,s.reader_id,'actions' AS stream,event_id AS record_id,event_time AS time FROM action_records a JOIN served_records s USING(impression_id) WHERE NOT EXISTS(SELECT 1 FROM export_members m WHERE m.stream='actions' AND m.record_id=a.event_id) ORDER BY event_id").fetchall()
+            served_range = " AND s.received_at>=? AND s.received_at<?" if interval else ""
+            action_range = " AND a.received_at>=? AND a.received_at<?" if interval else ""
+            rows = self.db.execute("SELECT s.*, 'served' AS stream, impression_id AS record_id, served_at AS time FROM served_records s WHERE NOT EXISTS(SELECT 1 FROM export_members m WHERE m.stream='served' AND m.record_id=s.impression_id)" + served_range + " ORDER BY impression_id", interval or ()).fetchall()
+            rows += self.db.execute("SELECT a.*,s.reader_id,'actions' AS stream,event_id AS record_id,event_time AS time FROM action_records a JOIN served_records s USING(impression_id) WHERE NOT EXISTS(SELECT 1 FROM export_members m WHERE m.stream='actions' AND m.record_id=a.event_id)" + action_range + " ORDER BY event_id", interval or ()).fetchall()
             groups = {}
             for row in rows:
                 if not self.get("revoked_users", "reader_id", row["reader_id"]):
-                    groups.setdefault((row["stream"], row["reader_id"], partition(row["time"])), []).append(row)
+                    groups.setdefault((row["stream"], row["reader_id"], interval_path or partition(row["time"])), []).append(row)
             for (stream, reader, part), records in groups.items():
                 for offset in range(0, len(records), 1000):
                     chunk, job = records[offset:offset + 1000], str(uuid.uuid4())
@@ -168,13 +170,13 @@ class Store:
                         exported.append(compact(item))
                     content = "\n".join(exported) + "\n"
                     self.db.execute("INSERT INTO export_jobs(job_id,reader_id,stream,partition_path,object_name,content,content_hash,row_count,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
-                                    (job, reader, stream, part, f"{stream}/{part}/part-{job}.jsonl", content, digest(content), len(chunk), iso(self.now())))
+                                    (job, reader, stream, part, f"{stream}/{part}/part-{job}.jsonl" + (".gz" if interval_path else ""), content, digest(content), len(chunk), iso(self.now())))
                     self.db.executemany("INSERT INTO export_members VALUES(?,?,?)", [(stream, r["record_id"], job) for r in chunk])
 
     def jobs(self, force=False):
         return [dict(r) for r in self.db.execute("SELECT j.* FROM export_jobs j WHERE status!='uploaded' AND NOT EXISTS(SELECT 1 FROM revoked_users r WHERE r.reader_id=j.reader_id) AND (? OR next_attempt_at<=?) ORDER BY created_at,job_id", (int(force), self.now()))]
 
-    def mark(self, job, error=None):
+    def mark(self, job, error=None, receipt=None):
         if error is None:
             self.db.execute("UPDATE export_jobs SET status='uploaded',last_error=NULL,attempts=attempts+1 WHERE job_id=?", (job["job_id"],))
         else:

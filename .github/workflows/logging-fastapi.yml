@@ -6,6 +6,9 @@ on:
       - 'tests/integration/**'
       - 'tests/helpers/**'
       - 'scripts/synthetic-logging-agent.mjs'
+      - 'src/**'
+      - 'server/**'
+      - 'tests/browser/**'
       - '.github/workflows/logging-fastapi.yml'
   push:
     branches: [main]
@@ -15,6 +18,26 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: logging
+          POSTGRES_PASSWORD: ci-integration-only
+          POSTGRES_DB: logging
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U logging -d logging"
+          --health-interval 3s --health-timeout 3s --health-retries 20
+      gcs:
+        image: fsouza/fake-gcs-server:1.54
+        env:
+          FAKE_GCS_SCHEME: http
+          FAKE_GCS_EXTERNAL_URL: http://127.0.0.1:4443
+        ports: ['4443:4443']
+    env:
+      TEST_POSTGRES_URL: postgresql://logging:ci-integration-only@127.0.0.1:5432/logging
+      STORAGE_EMULATOR_HOST: http://127.0.0.1:4443
     defaults:
       run:
         working-directory: services/logging-server
@@ -30,3 +53,9 @@ jobs:
       - run: python -m compileall -q logging_service
       - run: python -m pytest python_tests -q
       - run: node --test ../../tests/integration/fastapi-logging.test.mjs
+      - run: npm ci
+        working-directory: .
+      - run: npx playwright install --with-deps chromium
+        working-directory: .
+      - run: npm run test:browser
+        working-directory: .

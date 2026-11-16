@@ -1,5 +1,6 @@
 import logging
 import os
+from contextlib import nullcontext
 from pathlib import Path
 from threading import Lock
 
@@ -51,42 +52,63 @@ class Exporter:
         self.io_lock = Lock()
         self.state = {"lastSuccess": None, "lastError": None}
 
-    def flush(self, force=False):
-        with self.io_lock:
+    def flush(self, force=False, *, interval=None, interval_path=None):
+        lock = self.store.export_lock(wait=interval is not None) if hasattr(self.store, "export_lock") else nullcontext(True)
+        with self.io_lock, lock as acquired:
+            if not acquired:
+                return 0
+            if hasattr(self.store, "deletion_targets"):
+                for name in self.store.deletion_targets():
+                    self.sink.remove(name)
             with self.store.lock:
-                self.store.prepare_exports()
-                jobs = self.store.jobs(force)
+                self.store.prepare_exports(interval, interval_path)
+                jobs = self.store.jobs(force, interval_path) if interval_path else self.store.jobs(force)
             completed = 0
             last_error = None
             for job in jobs:
                 try:
-                    self.sink.put(job["object_name"], job["content"])
+                    self.check_lease(job)
+                    receipt = self.sink.put(job["object_name"], job["content"])
+                    self.check_lease(job)
                     self.after_write(job)
+                    self.check_lease(job)
                     manifest = {key: job[key] for key in ("job_id", "object_name", "stream", "partition_path", "row_count", "content_hash")}
                     manifest.update(schema_version=1, prepared_at=job["created_at"])
+                    if receipt:
+                        manifest["storage"] = receipt
                     self.sink.put(f"manifests/{job['job_id']}.json", compact(manifest) + "\n")
+                    self.check_lease(job)
                     with self.store.lock:
-                        self.store.mark(job)
+                        self.store.mark(job, receipt=receipt)
                     completed += 1
                     self.state["lastSuccess"] = iso(self.store.now())
                 except Exception as error:
                     last_error = type(error).__name__
-                    self.state["lastError"] = last_error
                     try:
                         with self.store.lock:
                             self.store.mark(job, error)
                     except Exception as mark_error:
+                        if hasattr(self.store, "check_export_lease"):
+                            raise error from mark_error
                         last_error = f"{last_error}; mark: {type(mark_error).__name__}"
-                        self.state["lastError"] = last_error
                         logger.error("Failed to record export job %s: %s", job["job_id"], type(mark_error).__name__)
+                    self.state["lastError"] = last_error
+                    if interval is not None:
+                        raise
             self.state["lastError"] = last_error
             return completed
 
+    def check_lease(self, job):
+        if hasattr(self.store, "check_export_lease"):
+            self.store.check_export_lease(job)
+
     def delete(self, reader):
-        with self.io_lock:
+        lock = self.store.export_lock(wait=True) if hasattr(self.store, "export_lock") else nullcontext(True)
+        with self.io_lock, lock:
             with self.store.lock:
                 jobs = self.store.revoke(reader)
             for job in jobs:
                 self.sink.remove(job["object_name"])
                 self.sink.remove(f"manifests/{job['job_id']}.json")
-            self.store.finish_deletion(reader)
+            with self.store.lock:
+                self.store.finish_deletion(reader)

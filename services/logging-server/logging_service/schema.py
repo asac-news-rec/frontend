@@ -2,6 +2,7 @@ import calendar
 import hashlib
 import json
 import re
+from sys import float_info
 from datetime import datetime, timezone
 
 
@@ -64,12 +65,30 @@ def envelope(body, key):
 
 
 def served(value, now):
-    shape(value, ["request_id", "impression_id", "reader_id", "article_id", "position", "served_at"])
+    shape(value, ["request_id", "impression_id", "reader_id", "article_id", "position", "served_at",
+                  "score", "model_version", "features_as_of"])
     result = {key: identifier(value.get(key)) for key in ["request_id", "impression_id", "reader_id", "article_id"]}
     position = value.get("position")
     if type(position) is not int or not 1 <= position <= 9007199254740991:
         raise InputError("INVALID_POSITION")
-    return {**result, "position": position, "served_at": timestamp(value.get("served_at"), now)}
+    result.update(position=position, served_at=timestamp(value.get("served_at"), now))
+    if "score" in value:
+        score = value["score"]
+        if score is not None and (type(score) not in (int, float) or not -float_info.max <= score <= float_info.max):
+            raise InputError("INVALID_SCORE")
+        result["score"] = score
+    if "model_version" in value:
+        version = value["model_version"]
+        result["model_version"] = None if version is None else identifier(version)
+    if "features_as_of" in value:
+        as_of = value["features_as_of"]
+        if as_of is not None:
+            # Validate without applying the ingestion window or losing join precision.
+            if not isinstance(as_of, str):
+                raise InputError("INVALID_TIME")
+            timestamp(re.sub(r"(\.\d{3})\d{1,3}(?=Z|[+-])", r"\1", as_of))
+        result["features_as_of"] = as_of
+    return result
 
 
 def action(value, now):

@@ -16,10 +16,25 @@ export function timestamp(value){
 }
 function time(value,now){const iso=timestamp(value),ms=Date.parse(iso);if(ms<now-86400000||ms>now+300000)bad('TIME_OUT_OF_RANGE');return iso;}
 export function parseServed(input,now){
- shape(input,['request_id','impression_id','reader_id','article_id','position','served_at']);
+ shape(input,['request_id','impression_id','reader_id','article_id','position','served_at','score','model_version','features_as_of']);
  const result={request_id:id(input.request_id),impression_id:id(input.impression_id),reader_id:id(input.reader_id),article_id:id(input.article_id)};
  if(!Number.isSafeInteger(input.position)||input.position<1)bad('INVALID_POSITION');
- return {...result,position:input.position,served_at:time(input.served_at,now)};
+ result.position=input.position;
+ result.served_at=time(input.served_at,now);
+ if(Object.hasOwn(input,'score')){
+  if(input.score!==null&&!Number.isFinite(input.score))bad('INVALID_SCORE');
+  result.score=input.score;
+ }
+ if(Object.hasOwn(input,'model_version'))result.model_version=input.model_version===null?null:id(input.model_version);
+ if(Object.hasOwn(input,'features_as_of')){
+  const asOf=input.features_as_of;
+  if(asOf!==null){
+   if(typeof asOf!=='string')bad('INVALID_TIME');
+   timestamp(asOf.replace(/(\.\d{3})\d{1,3}(?=Z|[+-])/,'$1'));
+  }
+  result.features_as_of=asOf;
+ }
+ return result;
 }
 export function parseAction(input,now){
  shape(input,['event_id','event_type','event_time','impression_id','page_type','duration_ms','ended_at']);

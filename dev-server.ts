@@ -6,6 +6,7 @@ const origin=process.env.PUBLIC_ORIGIN||`http://127.0.0.1:${port}`;
 const synthetic=process.env.SYNTHETIC_AGENT_TOKEN?{agentToken:process.env.SYNTHETIC_AGENT_TOKEN,loggingToken:process.env.LOGGING_TOKEN??'',loggingUrl:process.env.LOGGING_URL??'http://127.0.0.1:4195'}:undefined;
 if(synthetic&&!['127.0.0.1','localhost','[::1]'].includes(new URL(origin).hostname))throw new Error('SYNTHETIC_LOCAL_ONLY');
 if(synthetic&&process.env.HOST&&!['127.0.0.1','::1','localhost'].includes(process.env.HOST))throw new Error('SYNTHETIC_LOCAL_ONLY');
-const server=createDevServer({root,origin,backendBaseUrl:process.env.NEWS_BACKEND_URL||'http://127.0.0.1:8080/',synthetic});
+const logging=process.env.LOGGING_URL&&process.env.LOGGING_TOKEN?{url:process.env.LOGGING_URL,token:process.env.LOGGING_TOKEN}:undefined;
+const server=createDevServer({root,origin,backendBaseUrl:process.env.NEWS_BACKEND_URL||'http://127.0.0.1:8080/',synthetic,logging});
 server.listen(port,process.env.HOST||'127.0.0.1',()=>console.log(`Local frontend: ${origin}`));
 for(const signal of ['SIGINT','SIGTERM'])process.once(signal,()=>server.close());

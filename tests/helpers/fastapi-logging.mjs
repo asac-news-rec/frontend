@@ -15,7 +15,7 @@ export async function startFastApiLogging(t,token){
  const reservation=createServer();reservation.listen(0,'127.0.0.1');await once(reservation,'listening');
  const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
  const url=`http://127.0.0.1:${port}`;
- const child=spawn(process.env.LOGGING_PYTHON||'python',['-m','logging_service'],{cwd:service,stdio:['ignore','ignore','pipe'],env:{...process.env,LOGGING_TOKEN:token,LOGGING_DB:database,LOGGING_EXPORT_DIR:path.join(dir,'objects'),LOGGING_PORT:String(port),LOGGING_FLUSH_MS:'30000'}});
+ const child=spawn(process.env.LOGGING_PYTHON||'python',['-m','logging_service'],{cwd:service,stdio:['ignore','ignore','pipe'],env:{...process.env,LOGGING_STORE:'sqlite',LOGGING_TOKEN:token,LOGGING_DB:database,LOGGING_EXPORT_DIR:path.join(dir,'objects'),LOGGING_PORT:String(port),LOGGING_FLUSH_MS:'30000'}});
  let db;
  let failure='';child.stderr.on('data',b=>{failure=(failure+b.toString()).slice(-4000);});
  let spawnError;child.on('error',error=>{spawnError=error;});

@@ -32,6 +32,10 @@ class Settings:
     export_dir: str = str(ROOT / "data/objects")
     flush_ms: int = 30000
     max_records: int = 100000
+    database_url: str | None = None
+    gcs_bucket: str = ""
+    gcs_project: str | None = None
+    gcs_prefix: str = ""
 
     def __post_init__(self):
         if len(self.token) < 24:
@@ -41,9 +45,14 @@ class Settings:
 
     @classmethod
     def environment(cls):
+        mode = os.environ.get("LOGGING_STORE", "postgres")
+        url = os.environ.get("LOGGING_DATABASE_URL")
+        if mode not in ("postgres", "sqlite") or (mode == "postgres" and not url):
+            raise ValueError("LOGGING_DATABASE_URL_REQUIRED")
         return cls(os.environ.get("LOGGING_TOKEN", ""), os.environ.get("LOGGING_DB", cls.database),
                    os.environ.get("LOGGING_EXPORT_DIR", cls.export_dir), int(os.environ.get("LOGGING_FLUSH_MS", "30000")),
-                   int(os.environ.get("LOGGING_MAX_RECORDS", "100000")))
+                   int(os.environ.get("LOGGING_MAX_RECORDS", "100000")), url if mode == "postgres" else None,
+                   os.environ.get("GCS_BUCKET", ""), os.environ.get("GOOGLE_CLOUD_PROJECT"), os.environ.get("GCS_PREFIX", ""))
 
 
 class Events(BaseModel):
@@ -142,14 +151,19 @@ def create_app(settings=None):
     @asynccontextmanager
     async def lifespan(app):
         config = settings or Settings.environment()
-        lease = ServiceLock(config.database)
+        lease = ServiceLock(":memory:" if config.database_url else config.database)
         store = None
         stop = asyncio.Event()
         wake = asyncio.Event()
         worker = None
         try:
-            store = Store(config.database)
-            exporter = Exporter(store, LocalSink(config.export_dir))
+            if config.database_url:
+                from .postgres import PostgresStore
+                store = PostgresStore(config.database_url)
+                exporter = None
+            else:
+                store = Store(config.database)
+                exporter = Exporter(store, LocalSink(config.export_dir))
             app.state.config, app.state.store, app.state.exporter = config, store, exporter
             app.state.loop, app.state.wake = asyncio.get_running_loop(), wake
 
@@ -166,7 +180,8 @@ def create_app(settings=None):
                         except Exception:
                             logger.error("Periodic export failed")
 
-            worker = asyncio.create_task(periodic())
+            if not config.database_url:
+                worker = asyncio.create_task(periodic())
             yield
         finally:
             stop.set()
@@ -176,7 +191,7 @@ def create_app(settings=None):
             try:
                 if store:
                     try:
-                        if hasattr(app.state, "exporter"):
+                        if app.state.exporter:
                             await run_in_threadpool(app.state.exporter.flush)
                     finally:
                         store.close()
@@ -230,6 +245,8 @@ def create_app(settings=None):
     json_protected = [Depends(authenticate), Depends(json_type)]
 
     def notify_export(request):
+        if request.app.state.config.database_url:
+            return
         try:
             with request.app.state.store.lock:
                 if request.app.state.store.readiness()["pendingRecords"] >= 1000:
@@ -241,7 +258,8 @@ def create_app(settings=None):
     @app.get("/ready", dependencies=protected)
     def ready(request: Request):
         with request.app.state.store.lock:
-            return {**request.app.state.store.readiness(), "exporter": request.app.state.exporter.state}
+            exporter = request.app.state.exporter
+            return {**request.app.state.store.readiness(), "exporter": exporter.state if exporter else {"mode": "airflow"}}
 
     @app.post("/internal/served", dependencies=json_protected)
     def receive_served(request: Request, body: Records):
@@ -282,11 +300,18 @@ def create_app(settings=None):
 
     @app.post("/internal/flush", dependencies=json_protected)
     def flush(request: Request, body: dict = Body(...)):
+        if request.app.state.config.database_url:
+            return JSONResponse({"scheduled": False, "mode": "airflow"}, status_code=202)
         return {"completed": request.app.state.exporter.flush(True)}
 
     @app.post("/internal/delete-user", dependencies=json_protected)
     def delete_user(request: Request, body: DeleteReader):
-        request.app.state.exporter.delete(body.reader_id)
+        exporter = request.app.state.exporter
+        if exporter is None:
+            from .gcs import GCSSink
+            config = request.app.state.config
+            exporter = Exporter(request.app.state.store, GCSSink(config.gcs_bucket, config.gcs_project, config.gcs_prefix))
+        exporter.delete(body.reader_id)
         return {"deleted": True}
 
     return app

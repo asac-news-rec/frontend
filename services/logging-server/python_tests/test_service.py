@@ -5,6 +5,7 @@ import sqlite3
 import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from pathlib import Path
 from threading import Event
 from uuid import uuid4
@@ -120,6 +121,28 @@ def test_revoked_row_rolls_back_whole_file(client):
     assert client.get("/ready").json()["served"] == 0
 
 
+def test_served_model_metadata_is_exported(client, config):
+    metadata = dict(score=0.42, model_version="ctr-v3", features_as_of="2026-01-01T00:00:00.123456Z")
+    ranked = record(**metadata)
+    fallback = {**ranked, "impression_id": "imp-2", "position": 2,
+                "score": None, "model_version": None, "features_as_of": None}
+    results = client.post("/internal/served", json={"records": [ranked]}).json()["results"]
+    assert results[0]["status"] == "accepted"
+    assert upload(client, [fallback]).json()["results"][0]["status"] == "accepted"
+    assert upload(client, [ranked]).json()["results"][0]["status"] == "duplicate"
+    for field, value, code in (("score", True, "INVALID_SCORE"),
+                               ("features_as_of", "2026-02-30T00:00:00Z", "INVALID_TIME"),
+                               ("extra", 0, "UNKNOWN_FIELD")):
+        results = client.post("/internal/served", json={"records": [{**ranked, field: value}]}).json()["results"]
+        assert results[0]["code"] == code
+    assert client.post("/internal/flush", json={}).status_code == 200
+    exported = {row["impression_id"]: row
+                for file in Path(config.export_dir).rglob("*.jsonl")
+                for row in map(json.loads, file.read_text(encoding="utf-8").splitlines())}
+    assert {key: exported["imp-1"][key] for key in metadata} == metadata
+    assert all(exported["imp-2"][key] is None for key in metadata)
+
+
 def test_file_ack_survives_export_notification_failure(client, monkeypatch):
     def unavailable():
         raise sqlite3.OperationalError("busy")
@@ -191,30 +214,31 @@ def test_intake_completes_while_export_sink_is_blocked(client, monkeypatch):
         assert flush.result(timeout=3) == 1
 
 
-def test_export_continues_if_error_cannot_be_saved(client, monkeypatch):
-    accept(client)
-    assert send(client, [event()]).status_code == 200
-    exporter = client.app.state.exporter
-    put, mark = exporter.sink.put, exporter.store.mark
-    attempted = []
+def test_export_continues_if_error_cannot_be_saved(tmp_path, monkeypatch):
+    with closing(Store(":memory:")) as store:
+        store.intake_served({"records": [record()]})
+        store.intake_actions({"events": [event()]}, "reader-1", True)
+        exporter = Exporter(store, LocalSink(tmp_path))
+        put, mark = exporter.sink.put, store.mark
+        attempted = []
 
-    def fail_first_write(name, content):
-        attempted.append(name)
-        if len(attempted) == 1:
-            raise OSError("write failed")
-        put(name, content)
+        def fail_first_write(name, content):
+            attempted.append(name)
+            if len(attempted) == 1:
+                raise OSError("write failed")
+            put(name, content)
 
-    def mark_success_only(job, error=None):
-        if error:
-            raise sqlite3.OperationalError("busy")
-        mark(job)
+        def mark_success_only(job, error=None, receipt=None):
+            if error:
+                raise sqlite3.OperationalError("busy")
+            mark(job, receipt=receipt)
 
-    monkeypatch.setattr(exporter.sink, "put", fail_first_write)
-    monkeypatch.setattr(exporter.store, "mark", mark_success_only)
-    assert exporter.flush() == 1
-    assert exporter.state["lastError"] == "OSError; mark: OperationalError"
-    assert exporter.flush() == 1
-    assert exporter.state["lastError"] is None
+        monkeypatch.setattr(exporter.sink, "put", fail_first_write)
+        monkeypatch.setattr(store, "mark", mark_success_only)
+        assert exporter.flush() == 1
+        assert exporter.state["lastError"] == "OSError; mark: OperationalError"
+        assert exporter.flush() == 1
+        assert exporter.state["lastError"] is None
 
 
 def test_capacity_batch_does_not_overfill(config):

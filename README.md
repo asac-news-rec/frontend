@@ -84,3 +84,7 @@ git diff --check
 ## FastAPI 로깅 서비스
 
 별도 로깅 서버는 Python FastAPI로 실행합니다. JSON 수신·영속 ACK와 백엔드 JSONL 파일 업로드 계약, 기존 DB 이전, 실행·검증 명령은 [로깅 서비스 안내](services/logging-server/README.md)를 참고하세요. 프런트엔드 화면·정적 배포 방식은 그대로 유지합니다.
+
+## 일반 화면 행동 수집과 PostgreSQL·GCS
+
+`LOGGING_URL`과 서버용 `LOGGING_TOKEN`을 설정하면 기본 백엔드 화면에서 목록 노출·기사 열기·좋아요/취소를 수집합니다. 같은 출처 프록시가 독자를 확인하고 FastAPI가 PostgreSQL 커밋 후 응답합니다. 별도 worker가 발생 시각 KST 5분 구간 JSONL을 GCS에 저장합니다. 테이블 시간 파티션은 만들지 않습니다. [전체 실행 및 제한](services/logging-server/README.md), [인프라 연동 계약](docs/logging-server/postgresql-gcs-integration.md)을 참고하세요.

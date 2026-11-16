@@ -2,7 +2,7 @@ import type {IncomingMessage,ServerResponse} from 'node:http';
 
 export interface FeedRejection {status:number;error:string}
 
-export function createBackendProxy({baseUrl,origin,fetchImpl=fetch,onFeed}:{baseUrl?:string;origin:string;fetchImpl?:typeof fetch;onFeed?:(req:IncomingMessage,input:unknown,payload:unknown)=>Promise<void|FeedRejection>}) {
+export function createBackendProxy({baseUrl,origin,fetchImpl=fetch,onFeed,onReaderIssued}:{baseUrl?:string;origin:string;fetchImpl?:typeof fetch;onFeed?:(req:IncomingMessage,input:unknown,payload:unknown)=>Promise<boolean|void|FeedRejection>;onReaderIssued?:(req:IncomingMessage,res:ServerResponse,payload:unknown)=>void}) {
  const target=baseUrl?new URL(baseUrl.endsWith('/')?baseUrl:`${baseUrl}/`):null;
  return async (req:IncomingMessage,res:ServerResponse,pathname:string):Promise<boolean>=>{
   if(!['/api/user/anonymous','/api/category','/api/subcategory','/api/news/feed'].includes(pathname)&&!pathname.startsWith('/api/news/'))return false;
@@ -31,10 +31,13 @@ export function createBackendProxy({baseUrl,origin,fetchImpl=fetch,onFeed}:{base
   try{
    const upstream=await fetchImpl(new URL('api'+route,target),{method,headers:['/user/anonymous','/category'].includes(route)?{}:{'Content-Type':'application/json'},...(body.length?{body}:{}),signal:AbortSignal.timeout(8000)});
    if(!upstream.headers.get('content-type')?.includes('application/json'))return reply(502,{error:'INVALID_BACKEND_RESPONSE'});
-   const payload=await upstream.json();
+   let payload=await upstream.json();
+   if(upstream.ok&&route==='/user/anonymous'&&onReaderIssued)onReaderIssued(req,res,payload);
    if(upstream.ok&&route==='/news/feed'&&onFeed){
-    const rejection=await onFeed(req,JSON.parse(body.toString('utf8')),payload);
-    if(rejection)return reply(rejection.status,{error:rejection.error});
+    let enabled:boolean|void|FeedRejection;
+    try{enabled=await onFeed(req,JSON.parse(body.toString('utf8')),payload);}catch{enabled=false;}
+    if(enabled&&typeof enabled==='object')return reply(enabled.status,{error:enabled.error});
+    if(typeof enabled==='boolean'&&payload&&typeof payload==='object'&&!Array.isArray(payload))payload={...payload,collection_enabled:enabled};
    }
    return reply(upstream.status,payload);
   }catch{return reply(503,{error:'BACKEND_UNAVAILABLE'});}

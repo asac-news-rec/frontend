@@ -5,8 +5,11 @@ services:
       - "127.0.0.1:${LOGGING_PORT:-4195}:4195"
     environment:
       LOGGING_TOKEN: "${LOGGING_TOKEN:?Set LOGGING_TOKEN}"
-    volumes:
-      - logging-data:/service/data
+      LOGGING_STORE: postgres
+      LOGGING_DATABASE_URL: "${LOGGING_DATABASE_URL:?Set PostgreSQL URL}"
+      GCS_BUCKET: "${GCS_BUCKET:?Set raw logs bucket}"
+      GOOGLE_CLOUD_PROJECT: "${GOOGLE_CLOUD_PROJECT:?Set GCP project}"
+      GCS_PREFIX: "${GCS_PREFIX:-}"
     init: true
     restart: unless-stopped
     healthcheck:
@@ -14,5 +17,3 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
-volumes:
-  logging-data:
