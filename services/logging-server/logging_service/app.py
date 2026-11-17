@@ -159,7 +159,7 @@ def create_app(settings=None):
         try:
             if config.database_url:
                 from .postgres import PostgresStore
-                store = PostgresStore(config.database_url)
+                store = PostgresStore(config.database_url, initialize=True)
                 exporter = None
             else:
                 store = Store(config.database)

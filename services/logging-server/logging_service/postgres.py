@@ -63,7 +63,7 @@ class Database:
 
 
 class PostgresStore(Store):
-    def __init__(self, url, now=None):
+    def __init__(self, url, now=None, *, initialize=False):
         self.url = url
         self.now = now or (lambda: int(time.time() * 1000))
         self.lock = threading.RLock()
@@ -71,19 +71,34 @@ class PostgresStore(Store):
         self.connection = psycopg.connect(url, autocommit=True, row_factory=dict_row, connect_timeout=5)
         self.db = Database(self.connection)
         try:
-            with self.connection.transaction():
-                self.connection.execute("SELECT pg_advisory_xact_lock(%s)", (INTAKE_LOCK,))
-                self.connection.execute("CREATE SCHEMA IF NOT EXISTS behavior_logging")
-                self.connection.execute("SET search_path TO behavior_logging")
-                exists = self.connection.execute("SELECT to_regclass('schema_version') AS table_name").fetchone()["table_name"]
-                if exists:
-                    versions = self.connection.execute("SELECT version FROM schema_version").fetchall()
-                    if [row["version"] for row in versions] != [1]:
-                        raise RuntimeError("UNSUPPORTED_POSTGRES_SCHEMA_VERSION")
-                self.connection.execute((Path(__file__).parent / "postgres.sql").read_text(encoding="utf-8"))
+            self.connection.execute("SET search_path TO behavior_logging")
+            if initialize:
+                self._initialize_schema()
+            if not self._schema_exists():
+                raise RuntimeError("POSTGRES_SCHEMA_NOT_INITIALIZED")
+            self._check_schema_version()
         except BaseException:
             self.connection.close()
             raise
+
+    def _schema_exists(self):
+        result = self.connection.execute(
+            "SELECT to_regclass('behavior_logging.schema_version') AS table_name"
+        ).fetchone()
+        return result["table_name"] is not None
+
+    def _check_schema_version(self):
+        versions = self.connection.execute("SELECT version FROM schema_version").fetchall()
+        if [row["version"] for row in versions] != [1]:
+            raise RuntimeError("UNSUPPORTED_POSTGRES_SCHEMA_VERSION")
+
+    def _initialize_schema(self):
+        with self.connection.transaction():
+            self.connection.execute("SELECT pg_advisory_xact_lock(%s)", (INTAKE_LOCK,))
+            self.connection.execute("CREATE SCHEMA IF NOT EXISTS behavior_logging")
+            if self._schema_exists():
+                self._check_schema_version()
+            self.connection.execute((Path(__file__).parent / "postgres.sql").read_text(encoding="utf-8"))
 
     @contextmanager
     def transaction(self):
