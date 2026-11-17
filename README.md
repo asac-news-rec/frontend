@@ -26,20 +26,9 @@ npm start
 
 ## GCP 배포
 
-```powershell
-npm ci
-npm run check
-npm test
-npm run build
-```
+`Dockerfile`의 `production` 타깃은 이 저장소에서 빌드한 `dist/`를 Nginx 이미지에 포함합니다. Nginx는 `/`에서 화면을 제공하고 `/api/` 요청을 같은 Cloud Run 서비스의 FastAPI에 전달합니다.
 
-**배포 대상은 `dist/` 내용만입니다.** HTML, CSS, 브라우저 JavaScript만 포함합니다. `server/`, `.local/`, `node_modules/`, SQLite, 환경 파일은 배포하지 않습니다. `npm run build`는 이전 버전의 서버 파일이 남지 않도록 이 저장소의 `dist/`를 비우고 생성합니다.
-
-백엔드 저장소는 이미 `compose.yaml`에서 `./web:/usr/share/nginx/html:ro`를 연결하고, `nginx/default.conf`가 `/api/`, `/images/`, 정적 화면을 제공합니다. **기존 Nginx 설정을 변경하지 않고 `dist/` 안의 `index.html`과 `src/`를 백엔드 `web/`에 배치합니다.** `web/dist/`로 넣지 않습니다. 기존 참고 화면을 교체하므로 배포 담당자는 이전 파일을 백업하고 배포해야 합니다.
-
-예: 브라우저 `/api/news/feed` → 기존 Nginx → FastAPI `/news/feed`. 프론트 전용 Nginx 설정은 추가하지 않습니다. [기존 백엔드 구성에 맞춘 배포 안내](docs/contracts/frontend-deployment.md)를 참고하세요.
-
-소스만 GCP에 전달하는 경우 빌드 환경이 위 명령을 실행해야 합니다. Nginx는 TypeScript를 빌드하지 않습니다. 운영에서 `npm start`를 실행할 필요는 없으며 프론트 Node 실행 서버·방문자 DB 볼륨도 필요 없습니다. 운영 HTTPS·도메인·백엔드 주소는 백엔드/인프라 담당자가 설정합니다.
+프런트 CI는 이미지와 정적 화면·API 프록시를 검사합니다. 배포를 활성화하면 `main`에서 빌드한 이미지를 Artifact Registry에 올리고 Cloud Run `news-feed`의 `nginx` 컨테이너 이미지를 갱신합니다. 최초 활성화와 검증 절차는 [Cloud Run 프런트 배포 안내](docs/contracts/frontend-deployment.md)를 참조하세요.
 
 ## Docker 로컬 실행 (선택)
 

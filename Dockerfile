@@ -19,6 +19,10 @@ CMD ["node", ".local/dev-server.js"]
 # Same-origin logging gateway behind the existing static Nginx frontend.
 FROM local AS behavior-proxy
 
+FROM nginx:stable-alpine AS production
+COPY nginx/cloud-run.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/dist/ /usr/share/nginx/html/
+
 # docker build --target static --output type=local,dest=./site .
 FROM scratch AS static
 COPY --from=build /app/dist/ /
