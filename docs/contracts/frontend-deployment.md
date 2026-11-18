@@ -9,7 +9,7 @@ docker build --platform linux/amd64 --target production -t news-web:ci .
 bash scripts/smoke-cloud-run.sh news-web:ci
 ```
 
-스모크 테스트는 Cloud Run과 같은 네트워크 구성을 만들어 `/`, JS, CSS 응답과 `POST /api/news/feed`가 시험용 API의 `POST /news/feed`에 전달되는지 확인합니다. GitHub Actions의 `Frontend CI`는 이 검사를 PR과 `main`에서 실행합니다. `main` 푸시의 정적 빌드 파일은 `frontend-dist-<커밋 SHA>`로 90일간 보관합니다.
+스모크 테스트는 Cloud Run의 공유 네트워크를 재현해 `/`, JS, CSS 응답과 `/api/`의 경로 전달 및 익명 발급 응답의 `Set-Cookie` 전달을 확인합니다. 없는 정적 파일과 이미지 요청은 404인지 검사합니다. GitHub Actions의 `Frontend CI`는 이 검사를 PR과 `main`에서 실행합니다. `main` 푸시의 정적 빌드 파일은 `frontend-dist-<커밋 SHA>`로 90일간 보관합니다.
 
 ## 첫 배포 설정
 
@@ -30,7 +30,7 @@ bash scripts/smoke-cloud-run.sh news-web:ci
 ## 첫 배포와 롤백 검증
 
 - 배포 전후 Cloud Run 리비전의 컨테이너 이미지 목록을 비교해 `nginx`만 바뀌었는지 확인합니다. 다음 백엔드 릴리스에서도 현재 Nginx 이미지가 유지되는지 확인합니다.
-- 인증된 브라우저에서 화면, 익명 독자 쿠키 발급, 피드와 다음 페이지, 좋아요, 썸네일을 확인합니다. 현재 운영 프록시는 `/api/`를 전달합니다. 피드가 `/images/` 경로나 기존 로컬 이미지 URL을 반환한다면 해당 이미지의 운영 저장소 연결도 확인합니다.
+- 인증된 브라우저에서 화면, 익명 독자 쿠키 발급, 피드와 다음 페이지, 좋아요, 썸네일을 확인합니다. 로컬 백엔드 Compose의 `/images/`는 마운트된 이미지 디렉터리에서 제공됩니다. 현재 Cloud Run 릴리스에는 이 마운트가 없으므로 `/images/` 요청은 404이며 화면은 기본 일러스트를 표시합니다. 첫 배포에서 실제 피드의 이미지 URL을 확인하고, 상대 경로 또는 로컬 URL을 반환한다면 운영 이미지 저장소 연결을 확인합니다.
 - 화면만 되돌리려면 이전 Nginx 이미지 태그 또는 다이제스트로 `nginx` 컨테이너만 갱신합니다. 배포를 일시 중지하려면 저장소 변수 `FRONTEND_DEPLOY_ENABLED`를 끕니다.
 ## 2026-11-09 검증 기록
 
