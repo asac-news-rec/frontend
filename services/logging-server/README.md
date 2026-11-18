@@ -61,6 +61,36 @@ Compose는 PostgreSQL, GCS 에뮬레이터, 버킷 초기화와 API를 실행합
 
 ## Airflow DAG 배포
 
+Cloud SQL의 `behavior_logs`를 사용하는 경우, 먼저 로깅 API를 `logging_api`
+계정으로 시작해 `behavior_logging` 스키마를 초기화합니다. 이 계정에는 해당
+DB에서 스키마를 만들 권한과 스키마 객체 소유권이 필요합니다. 그다음
+`behavior_logs`에서 DB와 스키마 객체의 권한을 부여할 수 있는 운영 계정이
+[Airflow 권한 SQL](sql/airflow-grants.sql)을 실행합니다. `logging_airflow`는
+생성 권한 없이 초기화된 DB에 접속합니다.
+
+```bash
+# PGHOST, PGUSER 등 접속 정보는 운영 환경에서 주입합니다.
+psql --dbname=behavior_logs --set=ON_ERROR_STOP=1 \
+  --set=logging_database=behavior_logs --set=airflow_role=logging_airflow \
+  --file=sql/airflow-grants.sql
+```
+
+API 초기화가 커밋되기 전에 DAG가 시작되면 `POSTGRES_SCHEMA_NOT_INITIALIZED`가
+발생합니다. 이미 생성된 스키마에 `USAGE`가 없으면 PostgreSQL 권한 오류
+(`42501`)가 발생합니다. 권한 적용을 마친 뒤 dev에서 수동으로 DAG를 실행합니다.
+내보내기 SQL이나 정리 SQL을 수정할 때는 권한 SQL도 함께 검토하고,
+제한된 계정으로 실패 후 재시도와 정리를 수행하는 PostgreSQL 통합 테스트를 실행합니다.
+
+각 서비스의 `LOGGING_DATABASE_URL`은 psycopg가 읽는 `postgresql://` URI
+또는 libpq DSN입니다. URI의 비밀번호에는 URL 인코딩을 적용합니다.
+Secret Manager 이름은 FastAPI용 `logging-api-database-url`과 Airflow용
+`logging-airflow-database-url`을 제안합니다. Airflow 프록시 주소가 확정되면
+Airflow Secret에 다음 형식으로 설정합니다.
+
+```text
+postgresql://logging_airflow:<URL_ENCODED_PASSWORD>@cloud-sql-proxy.airflow.svc:5432/behavior_logs
+```
+
 Airflow 2.10 또는 3의 DAG 폴더에 `dags/export_behavior_logs.py`를 배포합니다. 태스크 실행 환경의 Python 경로에 이 디렉터리의 `logging_service` 패키지를 설치하거나 마운트하고 `requirements.txt`의 psycopg와 google-cloud-storage 의존성을 설치합니다. 실행 환경에 LOGGING_DATABASE_URL, GCS_BUCKET, GOOGLE_CLOUD_PROJECT, 선택 GCS_PREFIX, GCS 자격 증명을 주입합니다. 로컬 에뮬레이터를 쓰려면 Airflow 실행 환경에서 접근 가능한 STORAGE_EMULATOR_HOST를 설정합니다. 로깅 API가 PostgreSQL 스키마를 먼저 초기화해야 합니다.
 
 자동 실행 주기가 확정되면 DAG 파서에 `BEHAVIOR_EXPORT_CRON`(UTC cron)과 `BEHAVIOR_EXPORT_START`(첫 데이터 구간을 포함하도록 맞춘 UTC ISO 8601 시각)를 설정하고 DAG를 활성화합니다. catchup이 켜져 있으므로 시작일은 필요한 이력 범위에 맞춥니다. cron 설정 전에는 자동 실행 없이 수동 run의 conf에 아래처럼 실제 처리 범위를 입력합니다.
@@ -77,7 +107,7 @@ API는 PostgreSQL 커밋 후 ACK합니다. Airflow 태스크는 GCS 업로드 �
 
 같은 DAG의 `prune_postgresql` 태스크는 업로드 태스크와 별도로 실행합니다. 수신 시각과 발생 시각 모두 24시간이 지난 행 중 GCS 업로드 및 manifest 저장이 완료되고 generation이 기록된 행만 PostgreSQL에서 정리합니다. 미배정·실패·재시도 대기 행은 24시간이 지나도 보존합니다. 남은 행동이 참조하는 served 행도 유지합니다. 정리는 DAG 실행 시점에 수행하므로 실제 보관 시간은 실행 간격과 업로드 상태에 따라 24시간을 넘을 수 있습니다. 업로드한 작업의 원본이 모두 정리되면 DB의 작업 본문도 비우고, GCS 사용자 삭제에 필요한 객체명과 업로드 영수증을 남깁니다.
 
-PostgreSQL `behavior_logging` 스키마에 served_records, action_records, export_jobs, export_members, revoked_users와 스키마 버전을 만듭니다. DB 사용자는 이 스키마를 생성할 권한이 필요합니다. 뉴스 테이블을 수정하지 않습니다. 초기 구현은 수신·용량·철회 판정을 짧은 트랜잭션 advisory lock으로 직렬화합니다. Airflow 태스크는 별도 session advisory lock으로 한 번에 하나만 export하며, 프로세스 종료 시 PostgreSQL이 잠금을 해제합니다. 부하 증가 시 수신 lock·전체 count·준비 작업량 최적화가 필요합니다.
+로깅 API가 시작할 때 PostgreSQL `behavior_logging` 스키마와 로그·내보내기 테이블을 초기화합니다. Airflow는 접속 시 스키마 버전을 확인합니다. 초기 구현은 수신·용량·철회 판정을 짧은 트랜잭션 advisory lock으로 직렬화합니다. Airflow 태스크는 별도 session advisory lock으로 한 번에 하나만 export하며, 프로세스 종료 시 PostgreSQL이 잠금을 해제합니다. 부하 증가 시 수신 lock·전체 count·준비 작업량 최적화가 필요합니다.
 
 ## 같은 출처 프록시와 독자 문맥
 

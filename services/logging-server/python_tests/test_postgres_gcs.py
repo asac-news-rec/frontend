@@ -1,10 +1,13 @@
 import json
 import os
 import gzip
+import re
 import time
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from datetime import datetime, timezone
+from pathlib import Path
 from uuid import uuid4
 
 import psycopg
@@ -25,7 +28,7 @@ TOKEN = "postgres-integration-test-token-only"
 
 
 @pytest.fixture
-def database():
+def empty_database():
     # Never truncate a supplied database. Create and remove only a unique test DB.
     url = os.environ["TEST_POSTGRES_URL"]
     name = "logging_test_" + uuid4().hex
@@ -38,6 +41,13 @@ def database():
     finally:
         with psycopg.connect(url, autocommit=True) as admin:
             admin.execute(sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(name)))
+
+
+@pytest.fixture
+def database(empty_database):
+    with closing(PostgresStore(empty_database, initialize=True)):
+        pass
+    return empty_database
 
 
 @pytest.fixture
@@ -216,6 +226,71 @@ def test_airflow_interval_export_retry_and_delete(database, sink, monkeypatch):
     assert store.counts() == {"served": 0, "actions": 0}
     assert not list(sink.client.list_blobs(sink.bucket, prefix=sink.prefix))
     store.close()
+
+
+def test_airflow_database_role_can_export_retry_and_prune(empty_database, sink, monkeypatch):
+    database = empty_database
+    role = "logging_airflow_" + uuid4().hex
+    password = uuid4().hex
+    config = conninfo_to_dict(database)
+    airflow_url = make_conninfo(database, user=role, password=password)
+    grants = (Path(__file__).parents[1] / "sql" / "airflow-grants.sql").read_text(encoding="utf-8")
+    with psycopg.connect(database, autocommit=True) as owner:
+        owner.execute(sql.SQL("CREATE ROLE {} LOGIN PASSWORD {}").format(
+            sql.Identifier(role), sql.Literal(password)))
+        try:
+            with pytest.raises(RuntimeError, match="POSTGRES_SCHEMA_NOT_INITIALIZED"):
+                PostgresStore(airflow_url)
+            with closing(PostgresStore(database, initialize=True)):
+                pass
+            with pytest.raises(psycopg.errors.InsufficientPrivilege, match="behavior_logging"):
+                PostgresStore(airflow_url)
+
+            variables = {"logging_database": config["dbname"], "airflow_role": role}
+            owner.execute(re.sub(r':"([a-z_]+)"',
+                                 lambda match: sql.Identifier(variables[match[1]]).as_string(),
+                                 grants))
+            start = int(time.time() * 1000) - 25 * 60 * 60 * 1000
+            row, event = records(start)
+            with closing(PostgresStore(database, now=lambda: start)) as api:
+                assert api.intake_served({"records": [row]})["results"][0]["status"] == "accepted"
+                assert api.intake_actions({"events": [event]}, "reader", True)["results"][0]["status"] == "accepted"
+                api.intake_served({"records": [{**row, "impression_id": "not-exported"}]})
+                api.db.execute("UPDATE served_records SET received_at=? WHERE impression_id=?",
+                               (iso(start + 1000), "not-exported"))
+
+            monkeypatch.setenv("LOGGING_DATABASE_URL", airflow_url)
+            monkeypatch.setenv("GCS_BUCKET", sink.bucket.name)
+            monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "local-integration")
+            monkeypatch.setenv("GCS_PREFIX", sink.prefix)
+            bounds = tuple(datetime.fromtimestamp(ms / 1000, timezone.utc)
+                           for ms in (start, start + 1000))
+            def fail_put(*args):
+                raise OSError("simulated upload failure")
+
+            with monkeypatch.context() as failure:
+                failure.setattr(GCSSink, "put", fail_put)
+                with pytest.raises(OSError, match="simulated upload failure"):
+                    export_interval(*bounds)
+            with closing(PostgresStore(airflow_url)) as airflow:
+                assert any(job["last_error"] for job in airflow.jobs(force=True))
+            assert export_interval(*bounds) == 2
+            before = {b.name: b.generation for b in sink.client.list_blobs(sink.bucket, prefix=sink.prefix)}
+            assert len(before) == 4
+            assert export_interval(*bounds) == 0
+            assert before == {b.name: b.generation for b in sink.client.list_blobs(sink.bucket, prefix=sink.prefix)}
+
+            with closing(PostgresStore(airflow_url)) as airflow:
+                permissions = airflow.connection.execute("""
+                    SELECT has_database_privilege(current_database(), 'CREATE') AS database_create,
+                           has_schema_privilege('behavior_logging', 'CREATE') AS schema_create
+                """).fetchone()
+                assert permissions == {"database_create": False, "schema_create": False}
+                assert airflow.prune_exported_records() == {"served": 1, "actions": 1}
+                assert airflow.counts() == {"served": 1, "actions": 0}
+        finally:
+            owner.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role)))
+            owner.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(role)))
 
 
 def test_manifest_ack_loss_and_db_reconnection(database, sink, monkeypatch):
