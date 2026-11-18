@@ -1,55 +1,37 @@
-# 기존 백엔드 구성에 맞춘 프론트 배포
+# Cloud Run 프런트 배포
 
-## 확인 기준
+프런트 CI가 빌드한 HTML·CSS·JavaScript를 이 저장소의 Nginx 이미지에 담습니다. Cloud Run `news-feed`에서 `nginx` 컨테이너가 80번 포트로 화면을 제공하고, `/api/` 요청은 같은 인스턴스의 `fastapi` 컨테이너(`127.0.0.1:8000`)에 전달합니다. 브라우저는 같은 출처에서 화면과 API를 사용합니다.
 
-백엔드 저장소 `asac-news-rec/backend` main의 `nginx/default.conf`, `compose.yaml`, `app/main.py`, `app/repository.py`, `web/app.js`를 기준으로 맞춥니다. 확인 커밋: `cf31205`.
+## 이미지 검증
 
-기존 Nginx는 `/api/`를 `api:8000/`으로 전달하고, `/images/`는 `/srv/images/`, 화면은 `/usr/share/nginx/html`에서 제공합니다. 백엔드 Compose가 `./web`을 이 정적 파일 루트에 연결합니다. 백엔드 소스와 Nginx 설정은 변경하지 않습니다.
+```bash
+docker build --platform linux/amd64 --target production -t news-web:ci .
+bash scripts/smoke-cloud-run.sh news-web:ci
+```
 
-## 배포 파일
+스모크 테스트는 Cloud Run의 공유 네트워크를 재현해 `/`, JS, CSS 응답과 `/api/`의 경로 전달 및 익명 발급 응답의 `Set-Cookie` 전달을 확인합니다. 없는 정적 파일과 이미지 요청은 404인지 검사합니다. GitHub Actions의 `Frontend CI`는 이 검사를 PR과 `main`에서 실행합니다. `main` 푸시의 정적 빌드 파일은 `frontend-dist-<커밋 SHA>`로 90일간 보관합니다.
 
-GitHub Actions의 `Frontend CI`는 `main` 대상 PR과 `main`에 반영된 커밋에서 설치·검사·테스트·빌드를 실행합니다. `main` 빌드가 성공하면 Actions 실행 페이지에서 `frontend-dist-<커밋 SHA>` 결과물을 내려받을 수 있습니다. SHA는 해당 실행이 체크아웃한 `main`의 push 커밋입니다. Squash merge 직후에는 생성된 squash 커밋의 SHA입니다. 배포할 커밋의 Actions 실행에서 결과물을 내려받습니다. 결과물은 업로드 후 90일간 보관됩니다. 만료된 경우 같은 커밋을 체크아웃해 아래 명령으로 다시 빌드합니다.
+## 첫 배포 설정
 
-로컬과 CI의 Node.js 기준은 `package.json`의 `engines.node`입니다. Node.js를 올릴 때 `package.json`, `package-lock.json`, Dockerfile의 Node 베이스 이미지와 실행 안내를 함께 갱신합니다.
+1. [백엔드 배포 분리 요청](https://github.com/asac-news-rec/backend/issues/6)을 통해 백엔드 릴리스가 `fastapi`만 갱신하는지 확인합니다. 첫 배포와 롤백은 백엔드 배포 시간과 겹치지 않게 조율합니다.
+2. 프런트 레포의 GitHub Environment `frontend-production`을 준비하고 배포 브랜치를 `main`으로 제한합니다. 환경 변수에 아래 값을 등록합니다.
 
-1. 프론트에서 `npm ci`, `npm run check`, `npm test`, `npm run build`를 실행합니다.
-2. 배포 담당자가 기존 백엔드 `web/` 화면을 백업합니다.
-3. `dist/` 안의 `index.html`과 `src/` 디렉토리를 백엔드 `web/` 안에 배치합니다. 결과는 `web/index.html`, `web/src/app.js`, `web/src/style.css`입니다. `web/dist/`로 복사하지 않습니다.
-4. 백엔드의 기존 실행·배포 절차를 따릅니다. 로컬 Compose에서는 http://127.0.0.1:8080/ 에서 새 화면을 확인합니다.
+   | GitHub Actions 변수 | 값 |
+   |---|---|
+   | `GCP_PROJECT` | Cloud Run 프로젝트 ID |
+   | `RUN_REGION` | Cloud Run 리전 |
+   | `NEWS_WEB_IMAGE` | 태그 없는 Artifact Registry 이미지 경로 |
+   | `GCP_WORKLOAD_IDENTITY_PROVIDER` | GitHub OIDC용 Google Cloud Workload Identity Provider 전체 리소스 이름 |
+   | `GCP_DEPLOY_SERVICE_ACCOUNT` | 이미지 업로드와 Cloud Run 서비스 갱신에 사용할 서비스 계정 이메일 |
 
-별도의 프론트 Nginx 설정이나 Node 실행 서버는 필요 없습니다. `.local/`, 서버 코드, node_modules, 환경 파일, SQLite를 `web/`에 복사하지 않습니다. 기존 화면을 되돌릴 때는 백업한 `web/` 내용을 복구합니다. 프론트 변경만으로 백엔드 DB나 이미지 폴더를 덮어쓰지 않습니다.
+3. 인프라 담당자와 Workload Identity Federation을 연결합니다. 프런트 저장소의 승인된 배포 환경에서만 계정을 사용할 수 있게 하고, 필요한 범위의 Artifact Registry 쓰기, Cloud Run 배포, Cloud Run 런타임 계정 사용 권한을 확인합니다.
+4. 설정이 준비되면 저장소 변수 `FRONTEND_DEPLOY_ENABLED`를 `true`로 설정하고 Actions에서 `Frontend CI`를 `main`으로 실행합니다. 이후 `main` 푸시마다 검증 후 커밋 SHA로 태그한 이미지를 올리고 `news-feed`의 `nginx` 이미지를 갱신합니다.
 
-## API 경로와 응답
+## 첫 배포와 롤백 검증
 
-| 브라우저·로컬 프록시·Nginx 요청 | 메서드 | FastAPI 내부 경로 |
-|---|---|---|
-| `/api/user/anonymous` | POST (본문 없음) | `/user/anonymous` |
-| `/api/category` | POST (본문 없음) | `/category` |
-| `/api/subcategory` | POST `{category}` | `/subcategory` |
-| `/api/news/feed` | POST `{reader_id, offset, category?, subcategory?}` | `/news/feed` |
-| `/api/news/{article_id}/like` | PUT / DELETE `{reader_id}` | `/news/{article_id}/like` |
-
-`/api/`는 백엔드가 이미 제공하는 외부 경로입니다. 프론트 전용 접두사나 새 라우팅은 추가하지 않습니다. 로컬 개발 서버도 백엔드 Nginx의 `/api/*` 경로로 전달합니다.
-
-피드 응답의 `request_id`, `served_at`, `items`, `next_offset`을 사용하며 최상위 `reader_id`는 요구하지 않습니다. 카테고리는 `category_list`, 소분류는 `sub_category_list`입니다. 좋아요 응답은 `article_id`, `is_liked`, `changed`입니다. 백엔드의 페이지당 최대 20건 및 `next_offset: null` 종료 처리를 유지합니다. 브라우저 독자 ID 저장 키는 백엔드 참고 화면과 같은 `sai-news.backend-reader-id`를 사용합니다.
-
-## 이미지와 로컬 실행
-
-백엔드 참고 화면처럼 기존 `http://localhost:8001/...` 또는 `http://127.0.0.1:8001/...` 이미지 주소만 `/images/...`로 연결합니다. 외부 HTTP(S) 이미지는 유지하고 다른 프로토콜은 표시하지 않습니다. DB 값은 수정하지 않습니다.
-
-기본 로컬 개발 서버는 `NEWS_BACKEND_URL=http://127.0.0.1:8080/`를 사용합니다. Docker 프론트에서는 `http://host.docker.internal:8080/`입니다. 둘 다 백엔드 Nginx의 루트 주소이고 `/api/`를 붙이지 않습니다. 로컬에서도 `/images/*`를 같은 Nginx로 전달하므로 별도의 8001 이미지 서버는 필요 없습니다.
-
-## 검증과 운영
-
-- 기존 Nginx와 API를 실행하고 `/api/health`, 화면, 카테고리·소분류, 다음 페이지, 좋아요 설정·해제를 확인합니다.
-- `/images/`와 기존 로컬 이미지 URL이 변환된 주소에서 이미지가 보이는지 확인합니다.
-- `nginx -t` 및 실제 GCP 검증은 배포 환경에서 수행합니다. 도메인·HTTPS·접근 제어는 백엔드/인프라 담당자의 기존 정책을 따릅니다.
-- 같은 출처로 API를 호출합니다. 로컬 프록시의 Origin 검사가 운영 Nginx에 자동 적용되지는 않습니다.
-- 현재 백엔드 Compose의 8080 포트는 `127.0.0.1`에만 바인딩되어 있습니다. 이 로컬 설정 자체가 GCP 외부 공개 구성을 의미하지는 않습니다.
-- 기존 Nginx 캐시 정책을 변경하지 않았습니다. 교체 후 이전 화면이 보이면 브라우저 캐시를 확인합니다.
-
-이 변경은 프론트 소스와 안내만 수정하며 백엔드 `web/` 파일 교체·실제 GCP 배포를 수행하지 않습니다.
-
+- 배포 전후 Cloud Run 리비전의 컨테이너 이미지 목록을 비교해 `nginx`만 바뀌었는지 확인합니다. 다음 백엔드 릴리스에서도 현재 Nginx 이미지가 유지되는지 확인합니다.
+- 인증된 브라우저에서 화면, 익명 독자 쿠키 발급, 피드와 다음 페이지, 좋아요, 썸네일을 확인합니다. 로컬 백엔드 Compose의 `/images/`는 마운트된 이미지 디렉터리에서 제공됩니다. 현재 Cloud Run 릴리스에는 이 마운트가 없으므로 `/images/` 요청은 404이며 화면은 기본 일러스트를 표시합니다. 첫 배포에서 실제 피드의 이미지 URL을 확인하고, 상대 경로 또는 로컬 URL을 반환한다면 운영 이미지 저장소 연결을 확인합니다.
+- 화면만 되돌리려면 이전 Nginx 이미지 태그 또는 다이제스트로 `nginx` 컨테이너만 갱신합니다. 배포를 일시 중지하려면 저장소 변수 `FRONTEND_DEPLOY_ENABLED`를 끕니다.
 ## 2026-11-09 검증 기록
 
 - Node 검사·빌드·20개 테스트 통과. Docker 이미지 내부에서도 동일 검사·테스트 통과.
