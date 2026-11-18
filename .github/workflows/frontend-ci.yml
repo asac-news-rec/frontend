@@ -84,5 +84,5 @@ jobs:
             echo 'A newer main commit exists. Skipping Cloud Run deployment.'
             exit 0
           fi
-          gcloud run services update news-feed --project "$GCP_PROJECT" --region "$RUN_REGION" \
-            --container nginx --image "$IMAGE" --quiet
+          gcloud --quiet run services update news-feed --project "$GCP_PROJECT" --region "$RUN_REGION" \
+            --container nginx --image "$IMAGE"
