@@ -68,6 +68,19 @@ DB에서 스키마를 만들 권한과 스키마 객체 소유권이 필요합�
 [Airflow 권한 SQL](sql/airflow-grants.sql)을 실행합니다. `logging_airflow`는
 생성 권한 없이 초기화된 DB에 접속합니다.
 
+```bash
+# PGHOST, PGUSER 등 접속 정보는 운영 환경에서 주입합니다.
+psql --dbname=behavior_logs --set=ON_ERROR_STOP=1 \
+  --set=logging_database=behavior_logs --set=airflow_role=logging_airflow \
+  --file=sql/airflow-grants.sql
+```
+
+API 초기화가 커밋되기 전에 DAG가 시작되면 `POSTGRES_SCHEMA_NOT_INITIALIZED`가
+발생합니다. 이미 생성된 스키마에 `USAGE`가 없으면 PostgreSQL 권한 오류
+(`42501`)가 발생합니다. 권한 적용을 마친 뒤 dev에서 수동으로 DAG를 실행합니다.
+내보내기 SQL이나 정리 SQL을 수정할 때는 권한 SQL도 함께 검토하고,
+제한된 계정으로 실패 후 재시도와 정리를 수행하는 PostgreSQL 통합 테스트를 실행합니다.
+
 각 서비스의 `LOGGING_DATABASE_URL`은 psycopg가 읽는 `postgresql://` URI
 또는 libpq DSN입니다. URI의 비밀번호에는 URL 인코딩을 적용합니다.
 Secret Manager 이름은 FastAPI용 `logging-api-database-url`과 Airflow용
