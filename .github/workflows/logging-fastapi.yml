@@ -12,7 +12,8 @@ on:
       - '.github/workflows/logging-fastapi.yml'
   push:
     branches: [main]
-    paths: ['services/logging-server/**']
+    paths: ['services/logging-server/**', '.github/workflows/logging-fastapi.yml']
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
@@ -59,3 +60,50 @@ jobs:
         working-directory: .
       - run: npm run test:browser
         working-directory: .
+
+  deploy:
+    name: Deploy logging FastAPI to Cloud Run
+    needs: test
+    if: github.ref == 'refs/heads/main' && vars.LOGGING_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: logging-production
+    concurrency:
+      group: logging-server-production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      LOGGING_IMAGE: ${{ vars.LOGGING_IMAGE }}
+      GCP_PROJECT: ${{ vars.GCP_PROJECT }}
+      RUN_REGION: ${{ vars.RUN_REGION }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Build the verified release image
+        run: |
+          set -euo pipefail
+          : "${LOGGING_IMAGE:?Set LOGGING_IMAGE}" "${GCP_PROJECT:?Set GCP_PROJECT}" "${RUN_REGION:?Set RUN_REGION}"
+          image="${LOGGING_IMAGE}:$GITHUB_SHA"
+          docker build --platform linux/amd64 --tag "$image" services/logging-server
+          echo "IMAGE=$image" >> "$GITHUB_ENV"
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
+      - name: Publish and update the existing logging service
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gcloud run services describe logging-server --project "$GCP_PROJECT" --region "$RUN_REGION" >/dev/null
+          gcloud auth configure-docker "${LOGGING_IMAGE%%/*}" --quiet
+          docker push "$IMAGE"
+          if [[ "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" != "$GITHUB_SHA" ]]; then
+            echo 'A newer main commit exists. Skipping Cloud Run deployment.'
+            exit 0
+          fi
+          gcloud --quiet run services update logging-server --project "$GCP_PROJECT" --region "$RUN_REGION" \
+            --image "$IMAGE"
