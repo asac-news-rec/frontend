@@ -1,5 +1,8 @@
 # 행동 로깅 서버: FastAPI + PostgreSQL + GCS
 
+Cloud Run 최초 생성, 배포 workflow와 Airflow 검증 순서는
+[Cloud Run 배포 절차](../../docs/logging-server/cloud-run-deployment.md)를 따릅니다.
+
 현재 기본 실행 경로는 아래와 같습니다. PostgreSQL 테이블을 5분 단위로 나누지 않습니다.
 
 1. 실제 백엔드 화면에서 목록 노출·기사 열기·좋아요/취소를 생성합니다.
