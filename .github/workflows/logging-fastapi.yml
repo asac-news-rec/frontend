@@ -12,10 +12,12 @@ on:
       - '.github/workflows/logging-fastapi.yml'
   push:
     branches: [main]
-    paths: ['services/logging-server/**', '.github/workflows/logging-fastapi.yml']
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: logging-fastapi-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -67,9 +69,6 @@ jobs:
     if: github.ref == 'refs/heads/main' && vars.LOGGING_DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
     environment: logging-production
-    concurrency:
-      group: logging-server-production
-      cancel-in-progress: false
     permissions:
       contents: read
       id-token: write
