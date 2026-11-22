@@ -8,6 +8,7 @@ const key='sai-news.behavior-pending';
 let dropped=0,retrying=0,lastError:string|null=null;
 let sessionState:'ready'|'recovering'|'blocked'='ready',sessionGeneration=0,nextRecoveryAt=0;
 let recovery:Promise<boolean>|null=null;
+let identityGeneration=0,lifecycleBound=false;
 let notice:HTMLElement|null=null;
 function errorCode(body:unknown,fallback:string){const value=(body as {error?:unknown})?.error;return typeof value==='string'&&/^[A-Z_]{1,80}$/.test(value)?value:fallback;}
 function drop(id:string,reason:string){if(pending.delete(id)){dropped++;lastError=reason;}}
@@ -26,7 +27,7 @@ function report(){
 async function recoverSession(){
  if(recovery)return recovery;
  if(!collectionEnabled||!readerId||Date.now()<nextRecoveryAt)return false;
- const identity=readerId;
+ const identity=readerId,lifecycle=identityGeneration;
  sessionState='recovering';report();
  recovery=(async()=>{
   try{
@@ -34,12 +35,12 @@ async function recoverSession(){
    const body=await response.json().catch(()=>null);
    if(!response.ok)throw new Error(errorCode(body,`HTTP_${response.status}`));
    if(body?.reader_id!==identity)throw new Error('LOGGING_READER_MISMATCH');
-   if(readerId!==identity||!collectionEnabled)return false;
+   if(lifecycle!==identityGeneration||readerId!==identity||!collectionEnabled)return false;
    sessionGeneration++;sessionState='ready';lastError=null;nextRecoveryAt=0;return true;
-  }catch(error){sessionState='blocked';lastError=error instanceof Error?error.message:'SESSION_RECOVERY_FAILED';nextRecoveryAt=Date.now()+30000;return false;}
-  finally{report();}
+  }catch(error){if(lifecycle!==identityGeneration)return false;sessionState='blocked';lastError=error instanceof Error?error.message:'SESSION_RECOVERY_FAILED';nextRecoveryAt=Date.now()+30000;return false;}
+  finally{if(lifecycle===identityGeneration)report();}
  })();
- try{return await recovery;}finally{recovery=null;}
+ const activeRecovery=recovery;try{return await activeRecovery;}finally{if(recovery===activeRecovery)recovery=null;}
 }
 export function retryBehaviorEvents(){nextRecoveryAt=0;for(const entry of pending.values())void attempt(entry);}
 async function attempt(entry:{event:BehaviorEvent;created:number;attempts:number;inflight:boolean}){
@@ -51,7 +52,7 @@ async function attempt(entry:{event:BehaviorEvent;created:number;attempts:number
   const response=await fetch('/api/behavior/events',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({events:[entry.event]}),keepalive:true,signal:AbortSignal.timeout(10000)});
   if(!collectionEnabled||pending.get(entry.event.event_id)!==entry)return;
   if(response.status===401||response.status===403){
-   const body=await response.json().catch(()=>null);lastError=errorCode(body,`HTTP_${response.status}`);retrying++;
+   const body=await response.json().catch(()=>null);if(!collectionEnabled||pending.get(entry.event.event_id)!==entry)return;lastError=errorCode(body,`HTTP_${response.status}`);retrying++;
    if(lastError==='SESSION_REQUIRED')immediate=sessionGeneration!==generation||await recoverSession();
    else sessionState='blocked';
    return;
@@ -59,10 +60,11 @@ async function attempt(entry:{event:BehaviorEvent;created:number;attempts:number
   if([400,409,413,415].includes(response.status)){drop(entry.event.event_id,`HTTP_${response.status}`);return;}
   if(!response.ok)throw new Error('LOGGING_UNAVAILABLE');
   const ack=(await response.json()).results?.find((r:{event_id:string})=>r.event_id===entry.event.event_id);
+  if(!collectionEnabled||pending.get(entry.event.event_id)!==entry)return;
   if(ack?.status==='rejected')drop(entry.event.event_id,errorCode({error:ack.code},'EVENT_REJECTED'));
   else if(['accepted','duplicate'].includes(ack?.status)){pending.delete(entry.event.event_id);if(sessionState==='blocked')sessionState='ready';if(!pending.size)lastError=null;}
   else{retrying++;lastError='UNCONFIRMED_ACK';}
- }catch{retrying++;lastError='LOGGING_UNAVAILABLE';}finally{
+ }catch{if(collectionEnabled&&pending.get(entry.event.event_id)===entry){retrying++;lastError='LOGGING_UNAVAILABLE';}}finally{
   entry.inflight=false;persist();report();
   if(pending.get(entry.event.event_id)===entry)setTimeout(()=>void attempt(entry),immediate?0:Math.min(30000,1000*2**Math.min(entry.attempts,5)));
  }
@@ -75,26 +77,38 @@ export function recordBehavior(kind:string,impressionId:string|undefined,page='l
  const entry={event:JSON.parse(JSON.stringify(event)) as BehaviorEvent,created:Date.now(),attempts:0,inflight:false};
  pending.set(event.event_id,entry);persist();report();void attempt(entry);
 }
+export function resetBehaviorIdentity(){
+ identityGeneration++;collectionEnabled=false;readerId=null;pending.clear();
+ recovery=null;sessionGeneration++;sessionState='ready';nextRecoveryAt=0;
+ dropped=0;retrying=0;lastError=null;persist();report();
+}
 export async function initializeBehavior(){
+ const lifecycle=++identityGeneration;
  readerId=null;collectionEnabled=false;pending.clear();
  try{
  const response=await fetch('/api/behavior/status',{credentials:'same-origin',signal:AbortSignal.timeout(1500)});
- if(!response.ok||(await response.json()).enabled!==true){setBehaviorCollection(false);return;}
- const existing=await getBackendReaderId();
+ const status=await response.json().catch(()=>null);
+ if(lifecycle!==identityGeneration)return;
+ if(!response.ok||status?.enabled!==true){setBehaviorCollection(false);return;}
+ const existing=await getBackendReaderId();if(lifecycle!==identityGeneration)return;
  const session=await fetch('/api/behavior/session',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({reader_id:existing}),signal:AbortSignal.timeout(1500)});
  if(!session.ok)throw new Error('행동 수집 세션에 연결하지 못했습니다. 다시 불러와 주세요.');
  const identity=(await session.json()).reader_id;
+ if(lifecycle!==identityGeneration)return;
  if(identity!==existing)throw new Error('LOGGING_READER_MISMATCH');
  readerId=identity;collectionEnabled=true;
  try{const saved=JSON.parse(sessionStorage.getItem(key)??'null');if(saved?.readerId===readerId&&Array.isArray(saved.entries))for(const entry of saved.entries.slice(-500)){
   if(entry.event?.event_id&&typeof entry.created==='number'&&Date.now()-entry.created<1800000)pending.set(entry.event.event_id,{event:entry.event,created:entry.created,attempts:0,inflight:false});
  }}catch{}
  persist();for(const entry of pending.values())void attempt(entry);
+ if(!lifecycleBound){lifecycleBound=true;
  window.addEventListener('online',retryBehaviorEvents);
  window.addEventListener('focus',retryBehaviorEvents);
  window.addEventListener('pageshow',retryBehaviorEvents);
  window.addEventListener('pagehide',()=>{for(const entry of pending.values())navigator.sendBeacon('/api/behavior/events',new Blob([JSON.stringify({events:[entry.event]})],{type:'application/json'}));});
+ }
  }catch{
+  if(lifecycle!==identityGeneration)return;
   readerId=null;setBehaviorCollection(false);
  }
 }

@@ -1,8 +1,9 @@
+import {backendReaderEpoch,recoverBackendReader} from './reader-identity.js';
 import type {Article, ArticleSummary, Feed, FeedItem} from './types.js';
-import {likeButton,seedBackendLikes,backendLikeRevision} from './likes.js';
+import {likeButton,seedBackendLikes,backendLikeRevision,resetBackendLikes} from './likes.js';
 import {getBackendArticle,getBackendPage,getBackendCategories,getBackendSubcategories,type FeedCursor} from './backend-api.js';
 import {initializeSyntheticEvents,recordSyntheticOpen} from './synthetic-events.js';
-import {initializeBehavior,connectBehavior} from './behavior-events.js';
+import {initializeBehavior,connectBehavior,resetBehaviorIdentity} from './behavior-events.js';
 let pendingOpen:{articleId:string;impressionId:string}|null=null;
 const backendArticles=new Map<string, ArticleSummary>();
 const main=document.querySelector('main')!;
@@ -12,6 +13,7 @@ let detail:Article|null=null;
 let detailStatus='loading';
 let detailError='';
 let detailRequest=0;
+let readerRecoveryFailed=false;
 let categories: string[]=[];
 let subcategories: string[]=[];
 let subcategoryRequest=0;
@@ -56,7 +58,7 @@ function render(){
   main.querySelector('#category-retry')?.addEventListener('click',()=>{if(state.category==='전체')loadCategories();else loadSubcategories(state.category);});
   if(restoreSubcategoryFocus)main.querySelector<HTMLSelectElement>('#subcategory')?.focus({preventScroll:true});
   connectMore();behavior.observe();
-  const retry=main.querySelector<HTMLButtonElement>('#retry');if(retry)retry.onclick=()=>load();
+  const retry=main.querySelector<HTMLButtonElement>('#retry');if(retry)retry.onclick=()=>{if(readerRecoveryFailed)void recoverBackendReader(backendReaderEpoch(),{force:true}).catch(()=>{});else void load();};
 }
 function results(){
   if(state.status==='loading')return '<div class="loading-label" role="status">뉴스를 준비하고 있어요…</div><div class="skeleton-grid">'+Array.from({length:3},()=>'<div class="skeleton"><div></div><span></span><span></span></div>').join('')+'</div>';
@@ -102,7 +104,7 @@ async function load(){
     const feed=await getBackendPage(null,{filters:selectedFilters()});if(token!==state.request)return;
     state.feed=feed;nextCursor=feed.nextCursor;backendArticles.clear();feed.items.forEach(item=>backendArticles.set(item.article.id,item.article));seedBackendLikes(feed.items,true,likesAtStart);state.status='ready';
   }
-  catch(error){if(token!==state.request)return;state.status='error';state.error=error instanceof Error ? error.message : String(error);}
+  catch(error){if(token!==state.request)return;state.status='error';state.error=error instanceof Error ? error.message : String(error);if(state.error==='BACKEND_HTTP_401')readerRecoveryFailed=true;}
   render();
 }
 async function loadCategories(){
@@ -144,7 +146,7 @@ function renderArticle(){
  if(detailStatus==='error'||!detail){
   const missing=detailError==='BACKEND_HTTP_404';
   main.innerHTML=`<div class="empty" role="alert"><h1>${missing?'기사를 찾을 수 없어요':'기사 본문을 불러오지 못했어요'}</h1><p>${missing?'삭제되었거나 존재하지 않는 기사입니다.':'잠시 후 다시 시도해 주세요.'}</p><button id="detail-retry" class="primary">다시 시도</button><a class="back" href="#">뉴스 피드로 돌아가기</a></div>`;
-  main.querySelector('#detail-retry')?.addEventListener('click',()=>void loadArticle());return;
+  main.querySelector('#detail-retry')?.addEventListener('click',()=>{if(detailError==='BACKEND_HTTP_401')void recoverBackendReader(backendReaderEpoch(),{force:true}).catch(()=>{});else void loadArticle();});return;
  }
  const a=detail;
   main.innerHTML=`<article class="article-page" data-impression-id="${escape(backendArticles.get(a.id)?.impressionId??'')}"><a class="back" href="#">← 뉴스 피드로 돌아가기</a><div class="eyebrow"><span>${escape(a.category)}</span><span class="fiction">${a.synthetic?'가상 기사':'뉴스 기사'}</span></div><h1>${escape(a.title)}</h1><p class="article-summary">${escape(a.summary)}</p>${likeButton(a.id)}<div class="byline">${escape(a.publisher)} <span>${date(a.publishedAt)} KST</span></div>${art(a,'article-art')}<p class="illustration-note">기사 내용을 표현한 그래픽 일러스트</p><div class="article-body">${a.body.split('\n\n').map(p=>`<p>${escape(p)}</p>`).join('')}</div><aside class="source-note"><strong>백엔드 뉴스 API에서 받은 기사입니다.</strong><p>기사의 가상 여부는 상단 표기를 확인해 주세요.</p></aside><a class="back bottom-back" href="#">← 뉴스 피드로 돌아가기</a></article>`;
@@ -164,3 +166,19 @@ window.addEventListener('hashchange',()=>{
 function articleFromHash(){try{return location.hash.startsWith('#article/')?decodeURIComponent(location.hash.slice(9)):null;}catch{return null;}}
 state.articleId=articleFromHash();
 void Promise.all([initializeSyntheticEvents(),initializeBehavior()]).then(initialize).catch(error=>{state.status='error';state.error=error instanceof Error?error.message:String(error);render();});
+
+window.addEventListener('backend-reader-recovering',()=>{
+ readerRecoveryFailed=false;++state.request;++detailRequest;
+ resetBehaviorIdentity();resetBackendLikes();
+ state.feed=null;backendArticles.clear();nextCursor=null;loadingMore=false;moreError='';
+ state.articleId=null;pendingOpen=null;feedScrollY=0;detail=null;detailStatus='loading';state.status='loading';
+ history.replaceState(null,'',location.pathname+location.search);render();main.focus({preventScroll:true});
+});
+window.addEventListener('backend-reader-recovered',()=>{
+ const epoch=backendReaderEpoch();
+ void initializeBehavior().then(()=>{if(epoch===backendReaderEpoch())void load();});
+});
+window.addEventListener('backend-reader-recovery-failed',()=>{
+ readerRecoveryFailed=true;
+ state.status='error';state.error='독자 연결을 복구하지 못했습니다. 다시 시도해 주세요.';render();
+});
