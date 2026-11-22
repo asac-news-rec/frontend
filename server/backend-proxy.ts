@@ -6,7 +6,7 @@ export function newsReaderCookie(header: string | undefined) {
  return header?.split(';').map(value=>value.trim()).find(value=>value.startsWith('news_reader='));
 }
 
-export function createBackendProxy({baseUrl,origin,fetchImpl=fetch,onFeed,onReaderIssued}:{baseUrl?:string;origin:string;fetchImpl?:typeof fetch;onFeed?:(req:IncomingMessage,payload:unknown)=>Promise<boolean|void|FeedRejection>;onReaderIssued?:(req:IncomingMessage,res:ServerResponse,payload:unknown,cookie:string|undefined)=>void}) {
+export function createBackendProxy({baseUrl,apiPrefix='api',origin,fetchImpl=fetch,onFeed,onReaderIssued}:{baseUrl?:string;apiPrefix?:'api'|'';origin:string;fetchImpl?:typeof fetch;onFeed?:(req:IncomingMessage,payload:unknown)=>Promise<boolean|void|FeedRejection>;onReaderIssued?:(req:IncomingMessage,res:ServerResponse,payload:unknown,cookie:string|undefined)=>void}) {
  const target=baseUrl?new URL(baseUrl.endsWith('/')?baseUrl:`${baseUrl}/`):null;
  return async (req:IncomingMessage,res:ServerResponse,pathname:string):Promise<boolean>=>{
   const version=pathname.startsWith('/api/v1/')?'/v1':'';
@@ -42,7 +42,7 @@ export function createBackendProxy({baseUrl,origin,fetchImpl=fetch,onFeed,onRead
    if(acceptsJson)headers.set('Content-Type','application/json');
    const readerCookie=newsReaderCookie(req.headers.cookie);
    if(readerCookie)headers.set('Cookie',readerCookie);
-   const upstream=await fetchImpl(new URL('api'+version+route,target),{method,headers,...(body.length?{body}:{}),redirect:'manual',signal:AbortSignal.timeout(8000)});
+   const upstream=await fetchImpl(new URL((apiPrefix+version+route).replace(/^\//,''),target),{method,headers,...(body.length?{body}:{}),redirect:'manual',signal:AbortSignal.timeout(8000)});
    if(!upstream.headers.get('content-type')?.includes('application/json'))return reply(502,{error:'INVALID_BACKEND_RESPONSE'});
    let payload=await upstream.json();
    if(upstream.ok&&route==='/user/anonymous'){

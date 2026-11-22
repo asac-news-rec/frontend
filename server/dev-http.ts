@@ -5,21 +5,23 @@ import {createBackendProxy} from './backend-proxy.js';
 import {createSyntheticBridge, type SyntheticConfig} from './synthetic-bridge.js';
 import {createBehaviorBridge,type LoggingConfig} from './behavior-bridge.js';
 
-// Local development only. The optional synthetic bridge uses an in-memory session;
+// Shared local development / same-origin gateway transport. The optional synthetic bridge uses an in-memory session;
 // visitor APIs and SQLite are not initialized here.
-export function createDevServer({root,origin,backendBaseUrl,synthetic,logging}:{root:string;origin:string;backendBaseUrl?:string;synthetic?:SyntheticConfig;logging?:LoggingConfig}) {
+export function createDevServer({root,origin,backendBaseUrl,backendApiPrefix,gatewayOnly=false,synthetic,logging}:{root:string;origin:string;backendBaseUrl?:string;backendApiPrefix?:'api'|'';gatewayOnly?:boolean;synthetic?:SyntheticConfig;logging?:LoggingConfig}) {
   const bridge=createSyntheticBridge(origin,synthetic);
   const behavior=createBehaviorBridge(origin,backendBaseUrl,synthetic?undefined:logging);
-  const proxy=createBackendProxy({baseUrl:backendBaseUrl,origin,onReaderIssued(req,res,payload,cookie){
+  const proxy=createBackendProxy({baseUrl:backendBaseUrl,apiPrefix:backendApiPrefix,origin,onReaderIssued(req,res,payload,cookie){
     behavior.onReaderIssued(req,res,payload,cookie);
     bridge.onReaderIssued(req,payload,cookie);
   },onFeed:async(req,payload)=>{const rejection=await bridge.onFeed(req,payload);return rejection??await behavior.onFeed(req,payload);}});
   return http.createServer(async(req,res)=>{
     try {
       const pathname=new URL(req.url??'/',origin).pathname;
+      if(gatewayOnly&&pathname==='/health'&&req.method==='GET'){res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({status:'ok'}));return;}
       if(await bridge.handle(req,res,pathname))return;
       if(await behavior.handle(req,res,pathname))return;
       if(await proxy(req,res,pathname))return;
+      if(gatewayOnly){res.writeHead(404);res.end();return;}
       if(pathname.startsWith('/images/')) {
         if(req.method!=='GET'&&req.method!=='HEAD'){res.writeHead(405);res.end();return;}
         if(!backendBaseUrl){res.writeHead(503);res.end();return;}
