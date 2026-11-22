@@ -57,6 +57,7 @@ test('쿠키 삭제 뒤 동시 401을 한 번 복구하고 이전 독자 응답�
  await page.locator('#subcategory').waitFor();assert.equal(await page.locator('#subcategory').inputValue(),'교육');
  const current=feeds.at(-1).reader;assert.notEqual(current,old);assert.equal(issued,2);assert.equal(await page.evaluate(()=>window.recoveryCount),1);
  assert.equal(feeds.length,before+1);assert.deepEqual(feeds.at(-1),{reader:current,category:'사회',subcategory:'교육'});
+ assert.match(await page.locator('.like-notice').innerText(),/좋아요는 복구 후 다시 눌러 주세요/);
  assert.equal(await page.locator('.like-button').getAttribute('aria-pressed'),'false');assert.equal(likes.length,1);assert.equal(likes[0].reader,undefined);
  releaseOld();assert.equal(await page.evaluate(()=>window.staleFeed),'BACKEND_SESSION_CHANGED');
  assert.equal(await page.locator('a.card h3').textContent(),current);

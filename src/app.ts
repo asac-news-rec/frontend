@@ -146,7 +146,7 @@ function renderArticle(){
  if(detailStatus==='error'||!detail){
   const missing=detailError==='BACKEND_HTTP_404';
   main.innerHTML=`<div class="empty" role="alert"><h1>${missing?'기사를 찾을 수 없어요':'기사 본문을 불러오지 못했어요'}</h1><p>${missing?'삭제되었거나 존재하지 않는 기사입니다.':'잠시 후 다시 시도해 주세요.'}</p><button id="detail-retry" class="primary">다시 시도</button><a class="back" href="#">뉴스 피드로 돌아가기</a></div>`;
-  main.querySelector('#detail-retry')?.addEventListener('click',()=>void loadArticle());return;
+  main.querySelector('#detail-retry')?.addEventListener('click',()=>{if(detailError==='BACKEND_HTTP_401')void recoverBackendReader(backendReaderEpoch(),{force:true}).catch(()=>{});else void loadArticle();});return;
  }
  const a=detail;
   main.innerHTML=`<article class="article-page" data-impression-id="${escape(backendArticles.get(a.id)?.impressionId??'')}"><a class="back" href="#">← 뉴스 피드로 돌아가기</a><div class="eyebrow"><span>${escape(a.category)}</span><span class="fiction">${a.synthetic?'가상 기사':'뉴스 기사'}</span></div><h1>${escape(a.title)}</h1><p class="article-summary">${escape(a.summary)}</p>${likeButton(a.id)}<div class="byline">${escape(a.publisher)} <span>${date(a.publishedAt)} KST</span></div>${art(a,'article-art')}<p class="illustration-note">기사 내용을 표현한 그래픽 일러스트</p><div class="article-body">${a.body.split('\n\n').map(p=>`<p>${escape(p)}</p>`).join('')}</div><aside class="source-note"><strong>백엔드 뉴스 API에서 받은 기사입니다.</strong><p>기사의 가상 여부는 상단 표기를 확인해 주세요.</p></aside><a class="back bottom-back" href="#">← 뉴스 피드로 돌아가기</a></article>`;
@@ -172,7 +172,7 @@ window.addEventListener('backend-reader-recovering',()=>{
  resetBehaviorIdentity();resetBackendLikes();
  state.feed=null;backendArticles.clear();nextCursor=null;loadingMore=false;moreError='';
  state.articleId=null;pendingOpen=null;feedScrollY=0;detail=null;detailStatus='loading';state.status='loading';
- history.replaceState(null,'',location.pathname+location.search);render();
+ history.replaceState(null,'',location.pathname+location.search);render();main.focus({preventScroll:true});
 });
 window.addEventListener('backend-reader-recovered',()=>{
  const epoch=backendReaderEpoch();

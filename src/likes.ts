@@ -12,7 +12,7 @@ const notice=document.createElement('p');
 notice.className='like-notice';notice.setAttribute('role','status');document.body.append(notice);
 export function likeButton(id: string){const safe=String(id).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c as '&' | '<' | '>' | '"' | "'"]));return `<button class="like-button" data-like="${safe}" aria-label="기사 좋아요" aria-pressed="${liked.has(id)}" ${pending||status==='loading'?'disabled':''}>♡ 좋아요</button>`;}
 function update(){document.querySelectorAll<HTMLButtonElement>('[data-like]').forEach(button=>{const active=liked.has(button.dataset.like ?? '');button.setAttribute('aria-pressed',String(active));button.textContent='♡ 좋아요';button.disabled=pending||status==='loading';});}
-export function resetBackendLikes(){likeRequest++;revision++;changedAt.clear();liked.clear();pending=false;status='loading';notice.textContent='';update();}
+export function resetBackendLikes(){likeRequest++;revision++;changedAt.clear();liked.clear();pending=false;status='loading';notice.textContent='독자 연결을 다시 확인하고 있어요. 좋아요는 복구 후 다시 눌러 주세요.';update();}
 export function seedBackendLikes(items: FeedItem[],reset=false,requestedAt=revision){
  if(reset)for(const id of liked)if((changedAt.get(id)??0)<=requestedAt)liked.delete(id);
  for(const item of items){
