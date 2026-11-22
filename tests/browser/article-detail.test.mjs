@@ -7,16 +7,16 @@ import {chromium} from 'playwright';
 import {createDevServer} from '../../.local/server/dev-http.js';
 
 test('본문 없는 v1 피드와 상세 직접 진입·경합·오류·좋아요를 실제 프록시로 검증한다',async t=>{
- let releaseA,releaseLike,releaseDetail; t.after(()=>{releaseA?.();releaseLike?.();releaseDetail?.();});
+ let releaseA,releaseLike,releaseDetail,releaseFeed; t.after(()=>{releaseA?.();releaseLike?.();releaseDetail?.();releaseFeed?.();});
  const listen=async server=>{server.listen(0,'127.0.0.1');await once(server,'listening');t.after(()=>new Promise(r=>server.close(r)));return `http://127.0.0.1:${server.address().port}`;};
  const articles=Array.from({length:12},(_,i)=>({article_id:'a'+i,title:'상세 검증 기사 '+i,summary:'가상 테스트 기사',category:'사회',published_at:'2026-11-20T00:00:00Z',is_synthetic:true,is_liked:false}));
- const requests=[];let detailStatus=200,holdA=null,likeGate=null,detailGate=null,detailStarted;
+ const requests=[];let detailStatus=200,holdA=null,likeGate=null,detailGate=null,detailStarted,feedGate=null,feedStarted;
  const backend=await listen(createServer(async(req,res)=>{
   requests.push({url:req.url,cookie:req.headers.cookie});let payload;
   if(req.url==='/api/v1/user/anonymous'){res.setHeader('Set-Cookie','news_reader=test-only; Path=/; HttpOnly');payload={reader_id:'019a0000-0000-7000-8000-000000000001'};}
   else if(req.url==='/api/v1/category')payload={category_list:['사회']};
   else if(req.url==='/api/v1/subcategory')payload={sub_category_list:['교육']};
-  else if(req.url==='/api/v1/news/feed')payload={request_id:'feed-request',served_at:'2026-11-20T00:00:00Z',items:articles.map((a,i)=>({...a,impression_id:'feed-impression-'+i,position:i+1})),next_cursor:null};
+  else if(req.url==='/api/v1/news/feed'){payload={request_id:'feed-request',served_at:'2026-11-20T00:00:00Z',items:articles.map((a,i)=>({...a,impression_id:'feed-impression-'+i,position:i+1})),next_cursor:null};if(feedGate){feedStarted();await feedGate;}}
   else {
    const match=/^\/api\/v1\/news\/([^/]+)(\/like)?$/.exec(req.url??'');const a=articles.find(a=>a.article_id===match?.[1]);
    if(!a||(!match?.[2]&&detailStatus!==200)){res.writeHead(a?detailStatus:404,{'Content-Type':'application/json'});res.end('{}');return;}
@@ -58,6 +58,17 @@ test('본문 없는 v1 피드와 상세 직접 진입·경합·오류·좋아요
  releaseLike();await page.waitForFunction(()=>window.likeChanges===1);releaseDetail();
  await page.locator('.article-body').waitFor();assert.equal(await page.locator('article .like-button').getAttribute('aria-pressed'),'true');
  likeGate=null;detailGate=null;
+ // A feed completed while detail is open must still seed other articles.
+ articles[10].is_liked=true;
+ feedGate=new Promise(r=>releaseFeed=r);const feedArrived=new Promise(r=>feedStarted=r);
+ await page.locator('article .back').first().click();await page.locator('#refresh').click();await feedArrived;
+ await page.evaluate(()=>location.hash='#article/a8');await page.locator('.article-body').waitFor();
+ releaseFeed();feedGate=null;
+ await page.getByRole('link',{name:'← 뉴스 피드로 돌아가기',exact:true}).first().click();
+ await page.locator('a.card').first().waitFor();
+ assert.equal(await page.locator('[data-like="a10"]').getAttribute('aria-pressed'),'true');
+ assert.equal(await page.locator('[data-like="a8"]').getAttribute('aria-pressed'),'true');
+ assert.equal(await page.locator('[data-like="a10"]').isEnabled(),true);
  // Direct entry and reload fetch detail without requiring that article in a feed.
  const direct=await browser.newPage();await direct.goto(origin+'/#article/a9');await direct.locator('.article-body').waitFor();
  assert.equal(await direct.locator('article').getAttribute('data-impression-id'),'');

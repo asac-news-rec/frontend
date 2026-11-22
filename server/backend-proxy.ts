@@ -18,7 +18,7 @@ export function createBackendProxy({baseUrl,origin,fetchImpl=fetch,onFeed,onRead
   if(pathname==='/api/user/anonymous'){route='/user/anonymous';method='POST';}
   else if(pathname==='/api/category'){route='/category';method='POST';}
   else if(pathname==='/api/subcategory'){route='/subcategory';method='POST';}
-  else if(pathname==='/api/news/feed'){route='/news/feed';method='POST';}
+  else if(pathname==='/api/news/feed'&&req.method==='POST'){route='/news/feed';method='POST';}
   else {
    const match=/^\/api\/news\/([^/]+)(\/like)?$/.exec(pathname);
    if(!match)return reply(404,{error:'NOT_FOUND'});
@@ -29,9 +29,9 @@ export function createBackendProxy({baseUrl,origin,fetchImpl=fetch,onFeed,onRead
   }
   if(req.method!==method)return reply(405,{error:'METHOD_NOT_ALLOWED'});
   // Same-origin browser GETs may omit Origin. Writes still require the exact origin.
-  const originRejected=method==='GET'?req.headers.origin!==undefined&&req.headers.origin!==origin:req.headers.origin!==origin;
+  const originRejected=method==='GET'?(req.headers.origin!==undefined&&req.headers.origin!==origin)||req.headers['sec-fetch-site']==='cross-site':req.headers.origin!==origin;
   if(originRejected)return reply(403,{error:'ORIGIN_REJECTED'});
-  const acceptsJson=route==='/news/feed'||route==='/subcategory';
+  const acceptsJson=method==='POST'&&(route==='/news/feed'||route==='/subcategory');
   if(acceptsJson&&req.headers['content-type']?.split(';')[0]!=='application/json')return reply(415,{error:'JSON_REQUIRED'});
   let size=0;const chunks=[];
   for await(const chunk of req){size+=chunk.length;if(size>262144)return reply(413,{error:'BODY_TOO_LARGE'});chunks.push(chunk);}
@@ -50,7 +50,7 @@ export function createBackendProxy({baseUrl,origin,fetchImpl=fetch,onFeed,onRead
     if(cookies.length)res.setHeader('Set-Cookie',cookies);
     onReaderIssued?.(req,res,payload,cookies.length?newsReaderCookie(cookies[0]):readerCookie);
    }
-   if(upstream.ok&&route==='/news/feed'&&onFeed){
+   if(upstream.ok&&method==='POST'&&route==='/news/feed'&&onFeed){
     let enabled:boolean|void|FeedRejection;
     try{enabled=await onFeed(req,payload);}catch{enabled=false;}
     if(enabled&&typeof enabled==='object')return reply(enabled.status,{error:enabled.error});

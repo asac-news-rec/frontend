@@ -76,5 +76,8 @@ test('v1 피드 훅·익명 쿠키와 Origin 없는 상세 GET을 지원하고 �
  assert.equal((await fetch(base+'/api/v1/news/a1',{headers:{Origin:'https://evil.test'}})).status,403);
  assert.equal((await fetch(base+'/api/v1/news/a1',{method:'POST',headers})).status,405);
  assert.equal((await fetch(base+'/api/v1/news/a%2Fb')).status,400);
+ assert.equal((await fetch(base+'/api/v1/news/a1',{headers:{'Sec-Fetch-Site':'cross-site'}})).status,403);
  assert.equal(calls.length,3);
+ assert.equal((await fetch(base+'/api/v1/news/feed')).status,200);
+ assert.equal(calls.at(-1)[1].method,'GET');assert.equal(feeds,1);
 });

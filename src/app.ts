@@ -1,5 +1,5 @@
 import type {Article, ArticleSummary, Feed, FeedItem} from './types.js';
-import {likeButton,seedBackendLikes} from './likes.js';
+import {likeButton,seedBackendLikes,backendLikeRevision} from './likes.js';
 import {getBackendArticle,getBackendPage,getBackendCategories,getBackendSubcategories,type FeedCursor} from './backend-api.js';
 import {initializeSyntheticEvents,recordSyntheticOpen} from './synthetic-events.js';
 import {initializeBehavior,connectBehavior} from './behavior-events.js';
@@ -12,8 +12,6 @@ let detail:Article|null=null;
 let detailStatus='loading';
 let detailError='';
 let detailRequest=0;
-let likesRevision=0;
-window.addEventListener('likes-changed',()=>{likesRevision++;});
 let categories: string[]=[];
 let subcategories: string[]=[];
 let subcategoryRequest=0;
@@ -81,7 +79,7 @@ function connectMore(){
 }
 async function loadMore(){
   if(!state.feed||loadingMore||nextCursor===null||state.articleId||state.status!=='ready')return;
-  const token=state.request;
+  const token=state.request,likesAtStart=backendLikeRevision();
   const cursor=nextCursor;
   loadingMore=true;moreError='';
   const panel=main.querySelector('#pagination');
@@ -91,7 +89,7 @@ async function loadMore(){
     if(token!==state.request)return;
     const known=new Set(state.feed.items.map(item=>item.article.id));
     const added=page.items.filter(item=>!known.has(item.article.id));
-    state.feed.items.push(...added);nextCursor=page.nextCursor;added.forEach(item=>backendArticles.set(item.article.id,item.article));seedBackendLikes(added);
+    state.feed.items.push(...added);nextCursor=page.nextCursor;added.forEach(item=>backendArticles.set(item.article.id,item.article));seedBackendLikes(added,false,likesAtStart);
     if(!state.articleId)main.querySelector('.cards')?.insertAdjacentHTML('beforeend',added.map(card).join(''));behavior.observe();
   }catch(error){if(token!==state.request)return;moreError=error instanceof Error ? error.message : String(error);}
   finally{
@@ -99,10 +97,10 @@ async function loadMore(){
   }
 }
 async function load(){
-  const token=++state.request;state.status='loading';nextCursor=null;loadingMore=false;moreError='';render();
+  const token=++state.request,likesAtStart=backendLikeRevision();state.status='loading';nextCursor=null;loadingMore=false;moreError='';render();
   try{
     const feed=await getBackendPage(null,{filters:selectedFilters()});if(token!==state.request)return;
-    state.feed=feed;nextCursor=feed.nextCursor;backendArticles.clear();feed.items.forEach(item=>backendArticles.set(item.article.id,item.article));if(!state.articleId)seedBackendLikes(feed.items,true);state.status='ready';
+    state.feed=feed;nextCursor=feed.nextCursor;backendArticles.clear();feed.items.forEach(item=>backendArticles.set(item.article.id,item.article));seedBackendLikes(feed.items,true,likesAtStart);state.status='ready';
   }
   catch(error){if(token!==state.request)return;state.status='error';state.error=error instanceof Error ? error.message : String(error);}
   render();
@@ -127,13 +125,13 @@ async function loadSubcategories(category: string){
 }
 async function loadArticle(){
  const id=state.articleId;if(id===null)return;
- const token=++detailRequest,likesAtStart=likesRevision;detail=null;detailStatus='loading';detailError='';render();
+ const token=++detailRequest,likesAtStart=backendLikeRevision();detail=null;detailStatus='loading';detailError='';render();
  try{
   const result=await getBackendArticle(id);
   if(token!==detailRequest||state.articleId!==id)return;
   detail=result.article;detailStatus='ready';
   // A detail response started before a like completed must not undo that mutation.
-  if(likesAtStart===likesRevision)seedBackendLikes([{article:detail,rank:0,reason:'',isLiked:result.isLiked}]);
+  seedBackendLikes([{article:detail,rank:0,reason:'',isLiked:result.isLiked}],false,likesAtStart);
  }catch(error){
   if(token!==detailRequest||state.articleId!==id)return;
   detailStatus='error';detailError=error instanceof Error?error.message:String(error);
