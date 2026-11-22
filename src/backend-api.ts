@@ -1,5 +1,5 @@
 import {setBehaviorCollection} from './behavior-events.js';
-import {getBackendReaderId} from './reader-identity.js';
+import {getBackendReaderId,backendReaderEpoch,recoverBackendReader,confirmBackendReader} from './reader-identity.js';
 export {getBackendReaderId} from './reader-identity.js';
 import type {ArticleSummary} from './types.js';
 import {backendImageUrl} from './image-url.js';
@@ -36,10 +36,19 @@ export async function getBackendSubcategories(category: string,{fetchImpl=fetch}
 }
 
 async function request(route: string,body: object | undefined,method='POST',fetchImpl=fetch){
+ const epoch=backendReaderEpoch();
  const response=await fetchImpl('/api/v1'+route,{method,credentials:'same-origin',cache:'no-store',
   ...(body===undefined?{}:{headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})});
+ if(epoch!==backendReaderEpoch())throw new Error('BACKEND_SESSION_CHANGED');
+ if(response.status===401&&route.startsWith('/news/')){
+  await recoverBackendReader(epoch,{fetchImpl});
+  throw new Error('BACKEND_SESSION_CHANGED');
+ }
  if(!response.ok)throw new Error(`BACKEND_HTTP_${response.status}`);
- return response.json();
+ const payload=await response.json();
+ if(epoch!==backendReaderEpoch())throw new Error('BACKEND_SESSION_CHANGED');
+ if(route.startsWith('/news/'))confirmBackendReader(epoch);
+ return payload;
 }
 
 export interface FeedCursor { published_at: string; article_id: string; returned_count: number }
