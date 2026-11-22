@@ -2,7 +2,8 @@ import {createHmac,timingSafeEqual} from 'node:crypto';
 import type {IncomingMessage,ServerResponse} from 'node:http';
 import {newsReaderCookie} from './backend-proxy.js';
 
-export interface LoggingConfig {url:string;token:string}
+import {createLoggingSender,type LoggingConfig} from './logging-client.js';
+export type {LoggingConfig} from './logging-client.js';
 interface Session {readerId:string;expires:number}
 export function createBehaviorBridge(origin:string,backendUrl:string|undefined,config?:LoggingConfig){
  if(config&&config.token.length<24)throw new Error('LOGGING_TOKEN_MIN_24_CHARS');
@@ -24,11 +25,7 @@ export function createBehaviorBridge(origin:string,backendUrl:string|undefined,c
    if(typeof session.readerId==='string'&&session.readerId.length<=128&&typeof session.expires==='number'&&session.expires>Date.now())return session;
   }catch{}
  };
- const send=async(route:string,body:unknown,readerId?:string,signal=AbortSignal.timeout(8000))=>{
-  const response=await fetch(new URL(route,config!.url),{method:'POST',signal,headers:{'Content-Type':'application/json',Authorization:`Bearer ${config!.token}`,...(readerId?{'x-news-reader':readerId,'x-collection-enabled':'true','x-news-source':'browser'}:{})},body:JSON.stringify(body)});
-  if(!response.ok)throw new Error('LOGGING_UNAVAILABLE');
-  return response.json();
- };
+ const send=config?createLoggingSender(config):undefined;
  return {
   onReaderIssued(req:IncomingMessage,res:ServerResponse,payload:unknown,readerCookie:string|undefined){
    if(!config||!readerCookie||req.headers.origin!==origin)return;
@@ -56,7 +53,7 @@ export function createBehaviorBridge(origin:string,backendUrl:string|undefined,c
    // remain valid raw data on partial failure; only a complete ACK enables actions.
    const deadline=AbortSignal.timeout(1500);
    for(let start=0;start<records.length;start+=100){
-    const part=records.slice(start,start+100),ack=await send('/internal/served',{records:part},undefined,deadline);
+    const part=records.slice(start,start+100),ack=await send!('/internal/served',{records:part},undefined,deadline);
     if(!Array.isArray(ack.results)||ack.results.length!==part.length||ack.results.some((r:{status:string;impression_id:string},i:number)=>!['accepted','duplicate'].includes(r.status)||r.impression_id!==part[i].impression_id))throw new Error('SERVED_NOT_COMMITTED');
    }
    return true;
@@ -86,7 +83,7 @@ export function createBehaviorBridge(origin:string,backendUrl:string|undefined,c
    const chunks:Buffer[]=[];let size=0;
    for await(const chunk of req){size+=chunk.length;if(size>262144)return reply(413,{error:'BODY_TOO_LARGE'});chunks.push(chunk);}
    let body;try{body=JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{return reply(400,{error:'INVALID_JSON'});}
-   try{return reply(200,await send('/events',body,session.readerId));}catch{return reply(503,{error:'LOGGING_UNAVAILABLE'});}
+   try{return reply(200,await send!('/events',body,session.readerId));}catch{return reply(503,{error:'LOGGING_UNAVAILABLE'});}
   }
  };
 }

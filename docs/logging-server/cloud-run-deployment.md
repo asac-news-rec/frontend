@@ -78,3 +78,53 @@ FIFO로 보존하지는 않습니다. 최신 main 검사로 과거 실행의 배
 
 배포 중지는 `LOGGING_DEPLOY_ENABLED`를 끕니다. 롤백은 이전에 검증된 이미지 SHA나
 다이제스트로 기존 서비스의 이미지만 갱신합니다. DB와 GCS 데이터는 삭제하지 않습니다.
+
+## news-feed 행동 게이트웨이 (인프라 준비 후 활성화)
+
+브라우저는 같은 출처의 `/api/behavior/*`, v1 익명 발급·피드에만 접근합니다. Nginx가
+4173번 Node `behavior-proxy`로 전달하고, 게이트웨이는 같은 인스턴스 FastAPI
+`http://127.0.0.1:8000/v1/*`를 직접 호출합니다. Nginx의 80번 포트를 upstream으로
+사용하지 않으므로 순환하지 않습니다. 상세·좋아요·카테고리는 기존 `/api/` 전달을 유지합니다.
+
+인프라 #58의 서비스 URL·런타임 계정·인그레스 확인 전에는 아래 설정을 활성화하지 않습니다.
+현재 저장소의 workflow는 sidecar 최초 추가, Secret 연결, IAM·트래픽 설정을 하지 않습니다.
+
+1. `behavior-proxy` Docker 타깃을 SHA 태그로 빌드·발행합니다. 인프라에서 `news-feed`에
+   이름이 정확히 `behavior-proxy`인 sidecar를 최초 추가합니다. 포트 4173의 HTTP `/health`
+   기동 probe를 사용합니다. 이 응답은 Node 프로세스 기동 확인이며 로깅 DB readiness가 아닙니다.
+2. sidecar에 `PUBLIC_ORIGIN`(현재 브라우저 HTTPS origin, 끝 `/` 제외), `LOGGING_URL`
+   (별도 logging-server URL), `LOGGING_AUDIENCE`(해당 서비스의 IAM audience URL),
+   `LOGGING_TOKEN`(공유 Secret 연결), `PORT=4173`을 설정합니다. 임의의 생성 URL이나 Secret 값은
+   저장소·이슈에 적지 않습니다. 런타임은 현재 `news-feed` 서비스의 계정을 사용하며 실제 이메일은
+   인프라에서 확인합니다. 그 계정에 logging-server 호출과 토큰 Secret 읽기 권한이 필요합니다.
+3. Nginx 기동 의존성에 기존 FastAPI와 게이트웨이를 모두 포함하고, 로깅 서버까지의 인그레스·
+   네트워크 조건을 확인합니다. 런타임 계정과 DB 연결 등 기존 news-feed 설정을 보존합니다.
+4. `frontend-production` Environment에 태그 없는 `BEHAVIOR_PROXY_IMAGE`를 등록합니다.
+   인프라에서 확정한 이미지 경로를 사용합니다. 같은 Environment의 `FRONTEND_BEHAVIOR_ENABLED=true`
+   를 설정하면 프런트 배포가 `production-behavior` Nginx와 `behavior-proxy` 이미지를 함께 갱신합니다.
+   기본 미설정은 기존 `production` Nginx만 갱신합니다. sidecar가 없으면 활성 배포는 실패합니다.
+5. 준비 후 최신 main의 Frontend CI를 실행합니다. 별도 logging-server 배포와 이 설정은 독립입니다.
+   `/api/behavior/status`만으로 수집 성공을 판정하지 않습니다. 실제 피드의 `collection_enabled`,
+   동일 독자의 served/actions PostgreSQL ACK, 수동 Airflow 구간과 GCS 원본까지 확인합니다.
+
+게이트웨이는 메타데이터 서버에서 audience가 지정된 ID 토큰을 얻고, `exp` 60초 전까지 메모리에
+캐시합니다. 같은 시점의 획득 요청은 합치며 실패한 획득은 다음 요청에서 재시도할 수 있습니다.
+앱 Bearer는 `Authorization`, IAM 토큰은 `X-Serverless-Authorization`으로 구분합니다.
+ID 토큰을 얻지 못하거나 로깅 응답이 거절되면 해당 피드의 수집만 비활성화합니다. 뉴스 조회는
+유지하며, 기존 행동 큐는 같은 이벤트 ID로 재시도합니다. 리다이렉트는 따라가지 않습니다.
+
+근거: [Google Cloud 서비스 간 인증](https://docs.cloud.google.com/run/docs/authenticating/service-to-service).
+실제 IAM 토큰 획득과 Cloud Run 호출 성공은 dev 서비스 준비 후 검증해야 합니다.
+
+### 이미지 검사와 롤백
+
+`Frontend CI`는 기본 이미지와 선택형 Nginx·게이트웨이 이미지를 모두 빌드하고 같은 네트워크에서
+스모크 테스트합니다. 선택형 검사에는 직접 FastAPI 경로, 익명 쿠키·수집 증명 전달, 수집 비활성
+상태의 정상 피드 응답이 포함됩니다. 메타데이터/IAM과 실제 로깅 서버는 이 스모크에서 호출하지
+않습니다. ID 토큰 캐시·만료·실패는 별도 시험용 fetch로 검증합니다.
+
+롤백은 이전에 검증한 Nginx·게이트웨이 이미지 쌍을 함께 복원합니다. 수집을 중단하려면
+`FRONTEND_BEHAVIOR_ENABLED`를 끈 뒤 기본 `production` Nginx를 배포해 게이트웨이 경로를
+제거합니다. 변수만 끄는 것은 이미 배포된 경로를 즉시 바꾸지 않습니다. DB·GCS 데이터나
+sidecar 리소스는 이 workflow에서 삭제하지 않습니다. 백엔드의 전체 서비스 교체 릴리스가
+이 설정을 덮어쓸 가능성은 남으며, 해당 CD 분리는 이번 작업 범위 밖입니다.

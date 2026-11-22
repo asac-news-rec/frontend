@@ -87,3 +87,11 @@ git diff --check
 로컬 프록시는 v1 경로와 기존 경로를 모두 허용합니다. 상세 GET은 브라우저가 Origin 헤더를 생략할 수 있어 허용하며, 다른 Origin 또는 cross-site Fetch Metadata를 명시한 요청은 거절합니다. 상태 변경 요청은 기존처럼 정확한 Origin과 method·본문 검증을 유지합니다. 익명 쿠키 만료 시 401 자동 복구는 #34의 별도 작업입니다.
 
 상세 회귀 검증: `npm run test:browser` (Playwright Chromium 필요). 설치된 Chrome으로 검증할 때는 `PLAYWRIGHT_CHANNEL=chrome`을 지정할 수 있습니다. `article-detail.test.mjs`는 시험용 HTTP 백엔드와 실제 로컬 프록시로 본문 없는 목록, 상세 직접 진입·새로고침, 응답 경합, 404/503 재시도, 쿠키 전달·좋아요·스크롤 복원을 확인합니다. 운영 API 배포 검증을 대신하지 않습니다.
+
+## Cloud Run 행동 게이트웨이
+
+운영용 `behavior-proxy` 타깃은 정적 파일과 합성 에이전트 API를 제공하지 않는 Node sidecar입니다.
+`production-behavior` Nginx 이미지와 함께 사용하고, 기본 `production` 이미지는 기존 API 전달을
+유지합니다. 최초 sidecar·Secret·IAM 설정과 명시적 활성화가 필요합니다.
+[설정·검증·롤백](docs/logging-server/cloud-run-deployment.md#news-feed-행동-게이트웨이-인프라-준비-후-활성화)을
+따르며, 실제 dev 준비 확인 전에는 활성화하지 않습니다. 앱 토큰과 IAM ID 토큰은 서버에만 둡니다.

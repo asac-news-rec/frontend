@@ -81,3 +81,16 @@ test('v1 피드 훅·익명 쿠키와 Origin 없는 상세 GET을 지원하고 �
  assert.equal((await fetch(base+'/api/v1/news/feed')).status,200);
  assert.equal(calls.at(-1)[1].method,'GET');assert.equal(feeds,1);
 });
+
+test('sidecar는 FastAPI를 직접 호출해 Nginx 순환을 피하고 정적 파일을 제공하지 않는다',async t=>{
+ const {createDevServer}=await import('../.local/server/dev-http.js');const calls=[];
+ const upstream=createServer((req,res)=>{calls.push(req.url);res.writeHead(200,{'Content-Type':'application/json'});res.end('{}');});upstream.listen(0,'127.0.0.1');await once(upstream,'listening');
+ const origin='https://news.example';
+ const gateway=createDevServer({root:'.',origin,backendBaseUrl:`http://127.0.0.1:${upstream.address().port}`,backendApiPrefix:'',gatewayOnly:true});
+ gateway.listen(0,'127.0.0.1');await once(gateway,'listening');t.after(async()=>{await new Promise(r=>gateway.close(r));await new Promise(r=>upstream.close(r));});
+ const base=`http://127.0.0.1:${gateway.address().port}`;
+ assert.equal((await fetch(base+'/health')).status,200);
+ assert.equal((await fetch(base+'/')).status,404);
+ assert.equal((await fetch(base+'/api/v1/news/a')).status,200);
+ assert.deepEqual(calls,['/v1/news/a']);
+});
