@@ -57,3 +57,24 @@ test('served hook failure preserves news response while real backend failure sta
  mode='backend-network';response=await request();assert.equal(response.status,503);assert.deepEqual(await response.json(),{error:'BACKEND_UNAVAILABLE'});
  mode='backend-http';response=await request();assert.equal(response.status,503);assert.deepEqual(await response.json(),{error:'NEWS_UNAVAILABLE'});assert.equal(hooks,1);
 });
+
+test('v1 피드 훅·익명 쿠키와 Origin 없는 상세 GET을 지원하고 외부 Origin을 거절한다',async t=>{
+ const origin='http://127.0.0.1:4173',calls=[];let issued=0,feeds=0;
+ const proxy=createBackendProxy({baseUrl:'http://fixture.invalid',origin,fetchImpl:async(url,options)=>{
+  calls.push([String(url),options]);return Response.json({reader_id:'issued',items:[],next_cursor:null},{headers:{'Set-Cookie':'news_reader=proof; Path=/; HttpOnly'}});
+ },onReaderIssued(){issued++;},onFeed:async()=>{feeds++;return true;}});
+ const server=createServer(async(req,res)=>{if(!await proxy(req,res,new URL(req.url,origin).pathname)){res.writeHead(404);res.end();}});
+ server.listen(0,'127.0.0.1');await once(server,'listening');t.after(()=>new Promise(resolve=>server.close(resolve)));
+ const base=`http://127.0.0.1:${server.address().port}`;
+ const headers={Origin:origin,'Content-Type':'application/json',Cookie:'news_reader=proof; news_behavior=private'};
+ assert.equal((await fetch(base+'/api/v1/user/anonymous',{method:'POST',headers})).status,200);
+ assert.equal((await (await fetch(base+'/api/v1/news/feed',{method:'POST',headers,body:'{}'})).json()).collection_enabled,true);
+ assert.equal((await fetch(base+'/api/v1/news/a1',{headers:{Cookie:headers.Cookie}})).status,200);
+ assert.deepEqual(calls.map(([url])=>url),['http://fixture.invalid/api/v1/user/anonymous','http://fixture.invalid/api/v1/news/feed','http://fixture.invalid/api/v1/news/a1']);
+ assert.equal(calls[2][1].method,'GET');assert.equal(calls[2][1].body,undefined);
+ assert.equal(calls[2][1].headers.get('Cookie'),'news_reader=proof');assert.equal(issued,1);assert.equal(feeds,1);
+ assert.equal((await fetch(base+'/api/v1/news/a1',{headers:{Origin:'https://evil.test'}})).status,403);
+ assert.equal((await fetch(base+'/api/v1/news/a1',{method:'POST',headers})).status,405);
+ assert.equal((await fetch(base+'/api/v1/news/a%2Fb')).status,400);
+ assert.equal(calls.length,3);
+});

@@ -1,13 +1,11 @@
 import {setBehaviorCollection} from './behavior-events.js';
 import {getBackendReaderId} from './reader-identity.js';
 export {getBackendReaderId} from './reader-identity.js';
+import type {ArticleSummary} from './types.js';
 import {backendImageUrl} from './image-url.js';
 interface BackendArticle {
   article_id: string;
-  impression_id: string;
-  position: number;
   title: string;
-  paragraphs: string[];
   category: string;
   subcategory?: string | null;
   published_at: string;
@@ -38,7 +36,7 @@ export async function getBackendSubcategories(category: string,{fetchImpl=fetch}
 }
 
 async function request(route: string,body: object | undefined,method='POST',fetchImpl=fetch){
- const response=await fetchImpl('/api'+route,{method,credentials:'same-origin',cache:'no-store',
+ const response=await fetchImpl('/api/v1'+route,{method,credentials:'same-origin',cache:'no-store',
   ...(body===undefined?{}:{headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})});
  if(!response.ok)throw new Error(`BACKEND_HTTP_${response.status}`);
  return response.json();
@@ -53,19 +51,13 @@ function isFeedCursor(value: FeedCursor | null): boolean {
 
 export async function getBackendPage(cursor: FeedCursor | null=null,{fetchImpl=fetch,getReaderId=getBackendReaderId,filters={}}: {fetchImpl?: typeof fetch; getReaderId?: typeof getBackendReaderId; filters?: BackendFilters}={}){
  const readerId=await getReaderId();
- const response: {collection_enabled?:boolean; reader_id?: string; request_id: string; served_at: string; items: BackendArticle[]; next_cursor: FeedCursor | null}=await request('/news/feed',{...(cursor===null?{}:{cursor}),...(filters.category?{category:filters.category}:{}),...(filters.subcategory?{subcategory:filters.subcategory}:{})},'POST',fetchImpl);
+ const response: {collection_enabled?:boolean; reader_id?: string; request_id: string; served_at: string; items: (BackendArticle & {impression_id:string;position:number})[]; next_cursor: FeedCursor | null}=await request('/news/feed',{...(cursor===null?{}:{cursor}),...(filters.category?{category:filters.category}:{}),...(filters.subcategory?{subcategory:filters.subcategory}:{})},'POST',fetchImpl);
  if(!response||(response.reader_id!==undefined&&response.reader_id!==readerId)||typeof response.request_id!=='string'||!Number.isFinite(Date.parse(response.served_at))||
   !Array.isArray(response.items)||!isFeedCursor(response.next_cursor))throw new Error('INVALID_BACKEND_FEED');
- const items=response.items.map((item: BackendArticle)=>{
-  if(!item||typeof item.article_id!=='string'||typeof item.impression_id!=='string'||
-   !Number.isSafeInteger(item.position)||item.position<1||typeof item.title!=='string'||
-   !Array.isArray(item.paragraphs)||item.paragraphs.some((value: unknown)=>typeof value!=='string')||
-   typeof item.category!=='string'||!Number.isFinite(Date.parse(item.published_at))||
-   typeof item.is_synthetic!=='boolean'||typeof item.is_liked!=='boolean')throw new Error('INVALID_BACKEND_ARTICLE');
-  const article={id:item.article_id,title:item.title,summary:item.summary??'',paragraphs:item.paragraphs,
-   body:item.paragraphs.join('\n\n'),category:item.category,publisher:item.publisher??'언론사 미제공',
-   subcategory:item.subcategory??null,publishedAt:item.published_at,imageUrl:backendImageUrl(item.image_url),imageCaption:item.image_caption??null,
-   synthetic:item.is_synthetic,impressionId:item.impression_id,requestId:response.request_id,art:'library'};
+ const items=response.items.map(item=>{
+  const article=readArticle(item);
+  if(typeof item.impression_id!=='string'||!Number.isSafeInteger(item.position)||item.position<1)throw new Error('INVALID_BACKEND_ARTICLE');
+  article.impressionId=item.impression_id;
   return {article,rank:item.position,reason:'',impressionId:item.impression_id,isLiked:item.is_liked};
  });
  if(typeof response.collection_enabled==='boolean')setBehaviorCollection(response.collection_enabled);
@@ -77,4 +69,25 @@ export async function changeBackendLike(articleId: string,liked: boolean,{fetchI
  const result=await request(`/news/${encodeURIComponent(articleId)}/like`,undefined,liked?'PUT':'DELETE',fetchImpl);
  if(!result||result.article_id!==articleId||result.is_liked!==liked||typeof result.changed!=='boolean')throw new Error('INVALID_BACKEND_LIKE');
  return result;
+}
+
+function readArticle(value: unknown): ArticleSummary {
+ const item=value as BackendArticle;
+ if(!item||typeof item.article_id!=='string'||!item.article_id||typeof item.title!=='string'||
+  typeof item.category!=='string'||!Number.isFinite(Date.parse(item.published_at))||
+  typeof item.is_synthetic!=='boolean'||typeof item.is_liked!=='boolean'||
+  (item.summary!=null&&typeof item.summary!=='string')||(item.publisher!=null&&typeof item.publisher!=='string'))throw new Error('INVALID_BACKEND_ARTICLE');
+ return {id:item.article_id,title:item.title,summary:item.summary??'',category:item.category,
+  publisher:item.publisher??'언론사 미제공',subcategory:item.subcategory??null,publishedAt:item.published_at,
+  imageUrl:backendImageUrl(item.image_url),synthetic:item.is_synthetic,art:'library'};
+}
+
+export async function getBackendArticle(articleId: string,{fetchImpl=fetch,getReaderId=getBackendReaderId}: {fetchImpl?:typeof fetch;getReaderId?:typeof getBackendReaderId}={}) {
+ await getReaderId();
+ const response=await request(`/news/${encodeURIComponent(articleId)}`,undefined,'GET',fetchImpl);
+ if(!response||typeof response.request_id!=='string'||!Number.isFinite(Date.parse(response.served_at)))throw new Error('INVALID_BACKEND_DETAIL');
+ const article=readArticle(response.content);
+ if(article.id!==articleId||!Array.isArray(response.content.paragraphs)||response.content.paragraphs.some((p:unknown)=>typeof p!=='string'))throw new Error('INVALID_BACKEND_DETAIL');
+ // Detail requests have their own request_id and do not create a feed impression.
+ return {article:{...article,body:response.content.paragraphs.join('\n\n')},isLiked:response.content.is_liked as boolean};
 }

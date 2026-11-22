@@ -20,7 +20,7 @@ npm start
 
 접속: http://127.0.0.1:4173/ (`npm run dev`도 동일). 소스를 수정하면 서버를 종료하고 다시 시작합니다. 현재 자동 재빌드 기능은 없습니다.
 
-브라우저 요청은 백엔드 참고 화면과 동일하게 `/api/news/feed`, `/api/category`, `/api/subcategory`, `/api/user/anonymous`, `/api/news/{article_id}/like`를 사용합니다. 로컬 개발 서버는 이 경로와 `/images/*`를 백엔드 Nginx로 그대로 전달합니다. `NEWS_BACKEND_URL`은 `/api/`가 없는 Nginx 루트 주소입니다. FastAPI의 8000 포트가 아니라 Nginx의 8080 포트를 사용합니다. `PUBLIC_ORIGIN`을 지정한다면 실제 브라우저 주소와 일치시켜야 합니다. 기본 실행에서는 `127.0.0.1`을 사용합니다.
+브라우저 요청은 백엔드 참고 화면과 동일하게 `/api/v1/news/feed`, `/api/v1/category`, `/api/v1/subcategory`, `/api/v1/user/anonymous`, `/api/v1/news/{article_id}/like`를 사용합니다. 로컬 개발 서버는 이 경로와 `/images/*`를 백엔드 Nginx로 그대로 전달합니다. `NEWS_BACKEND_URL`은 `/api/`가 없는 Nginx 루트 주소입니다. FastAPI의 8000 포트가 아니라 Nginx의 8080 포트를 사용합니다. `PUBLIC_ORIGIN`을 지정한다면 실제 브라우저 주소와 일치시켜야 합니다. 기본 실행에서는 `127.0.0.1`을 사용합니다.
 
 백엔드가 꺼져 있으면 연결 오류를 표시합니다. 샘플 데이터로 자동 대체하지 않습니다. 로컬 서버는 화면 파일과 백엔드 프록시만 제공하며 SQLite·방문자 쿠키 API를 실행하지 않습니다. `.local/`은 개발·기존 회귀 테스트용 컴파일 결과이며 배포하지 않습니다.
 
@@ -51,10 +51,10 @@ docker build --target static --output type=local,dest=./site .
 
 ## 뉴스 API와 현재 한계
 
-- 브라우저 API: `POST /api/user/anonymous`, `POST /api/category`, `POST /api/subcategory`, `POST /api/news/feed`, `PUT/DELETE /api/news/{article_id}/like`.
-- 첫 피드 조회 전에 `POST /api/user/anonymous`를 본문 없이 호출합니다. 브라우저는 백엔드가 발급한 `news_reader` 쿠키를 후속 요청에 보냅니다. 피드 첫 요청은 필터만 담고, 다음 요청은 같은 필터와 직전 응답의 `next_cursor`를 담습니다. 좋아요 등록·해제는 본문 없이 호출합니다.
+- 브라우저 API: `GET /api/v1/news/{article_id}`, `POST /api/v1/user/anonymous`, `POST /api/v1/category`, `POST /api/v1/subcategory`, `POST /api/v1/news/feed`, `PUT/DELETE /api/v1/news/{article_id}/like`.
+- 첫 피드 조회 전에 `POST /api/v1/user/anonymous`를 본문 없이 호출합니다. 브라우저는 백엔드가 발급한 `news_reader` 쿠키를 후속 요청에 보냅니다. 피드 첫 요청은 필터만 담고, 다음 요청은 같은 필터와 직전 응답의 `next_cursor`를 담습니다. 좋아요 등록·해제는 본문 없이 호출합니다.
 - 피드 최상위 `reader_id`가 없는 성공 응답도 허용합니다. 기사의 `is_synthetic` 값에 따라 가상 여부를 표시합니다.
-- 추천 모델과 운영 행동 수집 서버는 연결하지 않았습니다. 로컬 가상 독자 세션의 클릭 수집만 별도 지원합니다. 기사 상세를 새로고침하면 목록 캐시가 없어 목록에서 다시 열어야 합니다.
+- 추천 모델과 운영 행동 수집 서버는 연결하지 않았습니다. 로컬 가상 독자 세션의 클릭 수집만 별도 지원합니다. 기사 상세는 `#article/{article_id}`로 직접 진입하거나 새로고침할 수 있습니다. 상세 본문과 최신 좋아요 상태는 GET 응답의 `content`에서 읽습니다. 상세 로딩·404·연결 오류와 재시도를 구분하며 목록 복귀 시 필터와 스크롤을 유지합니다.
 - 백엔드 참고 화면과 동일하게 기존 `localhost:8001`·`127.0.0.1:8001` 이미지 URL은 `/images/`로 연결합니다. DB를 바꾸지 않으며 외부 HTTP(S) 이미지 URL은 유지합니다.
 - 기존 `server.ts`, 방문자·샘플 서버와 관련 테스트는 회귀 확인용으로 남아 있습니다. 기본 로컬 실행이나 운영 정적 빌드에는 사용하지 않습니다.
 
@@ -77,3 +77,13 @@ git diff --check
 ## 일반 화면 행동 수집과 PostgreSQL·GCS
 
 `LOGGING_URL`과 서버용 `LOGGING_TOKEN`을 설정하면 기본 백엔드 화면에서 목록 노출·기사 열기·좋아요/취소를 수집합니다. 같은 출처 프록시가 독자를 확인하고 FastAPI가 PostgreSQL 커밋 후 응답합니다. 별도 worker가 발생 시각 KST 5분 구간 JSONL을 GCS에 저장합니다. 테이블 시간 파티션은 만들지 않습니다. [전체 실행 및 제한](services/logging-server/README.md), [인프라 연동 계약](docs/logging-server/postgresql-gcs-integration.md)을 참고하세요.
+
+## v1·상세 조회 전환과 배포 순서
+
+백엔드 PR #9가 반영된 API를 먼저 배포한 뒤 이 프런트를 배포합니다. 새 `/api/v1/news/feed`에는 본문이 없고, 상세 `GET /api/v1/news/{article_id}`의 `content.paragraphs`에서 읽습니다. 기존 `/api/news/feed`는 백엔드 호환 경로이며 이 프런트의 기본 요청에는 사용하지 않습니다. 백엔드만 이전 이미지로 롤백하면 새 주소가 없어지므로, 필요하면 이전 프런트 이미지를 먼저 복원한 뒤 백엔드를 복원합니다.
+
+상세 응답의 `request_id`는 상세 요청 식별자입니다. 목록의 `impression_id`를 대체하거나 새 노출로 기록하지 않습니다. 목록에서 열면 해당 목록 노출을 유지하고, 직접 진입한 기사에는 임의 노출 ID를 만들지 않습니다. 로깅·합성 게이트웨이는 v1 피드에서도 제공 기록 저장을 거칩니다. 운영용 게이트웨이 배치는 별도 후속 작업입니다.
+
+로컬 프록시는 v1 경로와 기존 경로를 모두 허용합니다. 상세 GET은 브라우저가 Origin 헤더를 생략할 수 있어 허용하며, 다른 Origin을 명시한 요청은 거절합니다. 상태 변경 요청은 기존처럼 정확한 Origin과 method·본문 검증을 유지합니다. 익명 쿠키 만료 시 401 자동 복구는 #34의 별도 작업입니다.
+
+상세 회귀 검증: `npm run test:browser` (Playwright Chromium 필요). 설치된 Chrome으로 검증할 때는 `PLAYWRIGHT_CHANNEL=chrome`을 지정할 수 있습니다. `article-detail.test.mjs`는 시험용 HTTP 백엔드와 실제 로컬 프록시로 본문 없는 목록, 상세 직접 진입·새로고침, 응답 경합, 404/503 재시도, 쿠키 전달·좋아요·스크롤 복원을 확인합니다. 운영 API 배포 검증을 대신하지 않습니다.

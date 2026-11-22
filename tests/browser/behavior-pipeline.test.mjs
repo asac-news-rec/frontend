@@ -22,10 +22,12 @@ test('ordinary screen exposure/open/like travels through proxy, PostgreSQL and G
  for(let i=0;;i++){try{if((await fetch(loggingUrl+'/health')).ok)break;}catch{}if(i===100)throw new Error(log);await new Promise(r=>setTimeout(r,50));}
  let serial=0;const readerIds=[],likes=new Set();
  const backend=await listen(createServer(async(req,res)=>{
+  req.url=req.url?.replace('/api/v1/','/api/');
   const chunks=[];for await(const b of req)chunks.push(b);const input=chunks.length?JSON.parse(Buffer.concat(chunks).toString()):{};let result;
   if(req.url==='/api/user/anonymous'){serial++;const id=`019a0000-0000-7000-8000-${randomUUID().replaceAll('-','').slice(-12)}`;readerIds.push(id);result={reader_id:id};}
   else if(req.url==='/api/category')result={category_list:['IT·과학']};
   else if(req.url==='/api/news/feed')result={request_id:randomUUID(),served_at:new Date().toISOString(),next_cursor:null,items:[0,1].map(i=>({article_id:`browser-a${i}`,impression_id:randomUUID(),position:i+1,title:`브라우저 가상 기사 ${i}`,paragraphs:['실제 사용자의 선호가 아닌 검증 데이터입니다.'],category:'IT·과학',published_at:new Date().toISOString(),is_synthetic:true,is_liked:likes.has(`browser-a${i}`)}))};
+  else if(req.method==='GET'&&req.url?.startsWith('/api/news/'))result={request_id:randomUUID(),served_at:new Date().toISOString(),content:{article_id:req.url.split('/')[3],title:'상세 기사',paragraphs:['검증용 가상 기사'],category:'IT·과학',published_at:new Date().toISOString(),is_synthetic:true,is_liked:likes.has(req.url.split('/')[3])}};
   else if(req.url?.endsWith('/like')){const id=decodeURIComponent(req.url.split('/')[3]),desired=req.method==='PUT',changed=likes.has(id)!==desired;if(desired)likes.add(id);else likes.delete(id);result={article_id:id,is_liked:desired,changed};}
   else{res.writeHead(404);res.end();return;}
   if(req.url==='/api/user/anonymous')res.setHeader('Set-Cookie',`news_reader=${result.reader_id}; Path=/; HttpOnly`);

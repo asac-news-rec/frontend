@@ -13,6 +13,7 @@ test('logging activation and cookie lifecycle preserve the canonical reader and 
  let issued=0,eventCount=0;const feeds=[],likeOwners=[],liked=new Set([legacy]);
  const logging=await listen(createServer(async(req,res)=>{const chunks=[];for await(const b of req)chunks.push(b);const body=JSON.parse(Buffer.concat(chunks).toString());if(req.url==='/events')eventCount++;res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({results:(body.records??body.events).map(r=>({...('event_id' in r?{event_id:r.event_id}:{impression_id:r.impression_id}),status:'accepted'}))}));}));
  const backend=await listen(createServer(async(req,res)=>{
+  req.url=req.url?.replace('/api/v1/','/api/');
   const reader=req.headers.cookie?.split('=')[1];let payload;
   if(req.url==='/api/user/anonymous'){if(reader)payload={reader_id:reader};else{issued++;payload={reader_id:`019a0000-0000-7000-8000-${String(issued+10).padStart(12,'0')}`};res.setHeader('Set-Cookie',`news_reader=${payload.reader_id}; Path=/; HttpOnly`);}}
   else if(req.url==='/api/category')payload={category_list:['사회']};

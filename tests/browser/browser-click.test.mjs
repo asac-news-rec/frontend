@@ -15,6 +15,7 @@ test('real browser click reaches SQLite once, isolated readers and invalid choic
  const listen=async server=>{server.listen(0,'127.0.0.1');await once(server,'listening');t.after(()=>new Promise(resolve=>server.close(resolve)));return `http://127.0.0.1:${server.address().port}`;};
  let failSecondBatch=false;
  const loggingUrl=await listen(createServer(async(req,res)=>{
+  req.url=req.url?.replace('/api/v1/','/api/');
   const chunks=[];for await(const chunk of req)chunks.push(chunk);
   const body=Buffer.concat(chunks);
   if(failSecondBatch&&req.url==='/internal/served'&&JSON.parse(body).records[0].position===101){
@@ -30,6 +31,7 @@ test('real browser click reaches SQLite once, isolated readers and invalid choic
  const feeds=[];
  let serial=0, paginate=false, largeFeed=false;
  const backend=await listen(createServer(async(req,res)=>{
+  req.url=req.url?.replace('/api/v1/','/api/');
   const readerId=req.headers.cookie?.split('=')[1];
   let payload;
   if(req.url==='/api/user/anonymous')payload={reader_id:`019a0000-0000-7000-8000-${String(++serial).padStart(12,'0')}`};
@@ -41,7 +43,7 @@ test('real browser click reaches SQLite once, isolated readers and invalid choic
    const {cursor}=JSON.parse(Buffer.concat(chunks).toString('utf8'));
    const next_cursor=paginate&&!cursor?{article_id:'article-1',published_at:new Date().toISOString(),returned_count:2}:null;
    payload={reader_id:readerId,request_id:randomUUID(),served_at:new Date().toISOString(),next_cursor,items:titles.map((title,index)=>({article_id:`article-${index}`,impression_id:randomUUID(),position:(cursor?.returned_count??0)+index+1,title,paragraphs:['브라우저 검증용 가상 기사입니다.'],category:index?'스포츠':'IT·과학',published_at:new Date().toISOString(),is_synthetic:true,is_liked:false}))};feeds.push(payload);
-  }else{res.writeHead(404);res.end();return;}
+  }else if(req.method==='GET'&&req.url?.startsWith('/api/news/')){payload={request_id:randomUUID(),served_at:new Date().toISOString(),content:feeds.at(-1).items.find(i=>i.article_id===req.url.split('/')[3])};}else{res.writeHead(404);res.end();return;}
   if(req.url==='/api/user/anonymous')res.setHeader('Set-Cookie',`news_reader=${payload.reader_id}; Path=/; HttpOnly`);
   res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify(payload));
  }));
