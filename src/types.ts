@@ -6,7 +6,7 @@ export interface Reader {
   isNew: boolean;
 }
 
-export interface Article {
+export interface ArticleSummary {
   impressionId?: string;
   id: string;
   title: string;
@@ -15,14 +15,17 @@ export interface Article {
   subcategory?: string | null;
   publisher: string;
   publishedAt: string;
-  body: string;
   art: string;
   imageUrl?: string | null;
   synthetic?: boolean;
 }
 
+export interface Article extends ArticleSummary {
+  body: string;
+}
+
 export interface FeedItem {
-  article: Article;
+  article: ArticleSummary;
   rank: number;
   reason: string;
   impressionId?: string;

@@ -13,12 +13,12 @@ trap cleanup EXIT
 # Match Cloud Run's shared network namespace without a live API or database.
 api=$(docker run -d -p 127.0.0.1::80 node:24.21.0-bookworm-slim node -e '
   require("node:http").createServer((req, res) => {
-    if (req.method === "POST" && req.url === "/user/anonymous") {
+    if (req.method === "POST" && req.url === "/v1/user/anonymous") {
       res.setHeader("Set-Cookie", "news_reader=smoke-test; Path=/; HttpOnly; Secure");
       res.end("{}");
       return;
     }
-    if (req.method !== "POST" || req.url !== "/news/feed") {
+    if (req.method !== "POST" || req.url !== "/v1/news/feed") {
       res.writeHead(404).end();
       return;
     }
@@ -38,8 +38,8 @@ for path in /images/missing.jpg /foo; do
     --write-out '%{http_code}' "http://$address$path")" = 404
 done
 test "$(curl --fail --silent --show-error --retry 5 --max-time 5 --data '{}' \
-  "http://$address/api/news/feed")" = 'feed-proxy-ok'
+  "http://$address/api/v1/news/feed")" = 'feed-proxy-ok'
 curl --fail --silent --show-error --max-time 5 --request POST --dump-header - \
-  --output /dev/null "http://$address/api/user/anonymous" \
+  --output /dev/null "http://$address/api/v1/user/anonymous" \
   | grep -iF 'Set-Cookie: news_reader=smoke-test; Path=/; HttpOnly; Secure' >/dev/null
 echo 'Cloud Run frontend smoke test passed'

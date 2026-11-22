@@ -19,13 +19,14 @@ test('logging failures disable collection while feed, detail, pagination and lik
   res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({results:(body.records??body.events).map(r=>({...('event_id' in r?{event_id:r.event_id}:{impression_id:r.impression_id}),status:'accepted'}))}));
  }));
  const backend=await listen(createServer(async(req,res)=>{
+  req.url=req.url?.replace('/api/v1/','/api/');
   const chunks=[];for await(const c of req)chunks.push(c);const body=chunks.length?JSON.parse(Buffer.concat(chunks).toString()):{};let payload;
   if(req.url==='/api/user/anonymous')payload={reader_id:`019a0000-0000-7000-8000-${String(++reader).padStart(12,'0')}`};
   else if(req.url==='/api/category')payload={category_list:['IT·과학']};
   else if(req.url==='/api/news/feed'){
    feeds.push({...body,reader_id:req.headers.cookie?.split('=')[1]});const offset=body.cursor?.returned_count??0;
    payload={request_id:randomUUID(),served_at:new Date().toISOString(),next_cursor:offset===0?{published_at:new Date().toISOString(),article_id:'a0',returned_count:1}:null,items:[{article_id:`a${offset}`,impression_id:randomUUID(),position:offset+1,title:`장애 중에도 읽는 기사 ${offset}`,paragraphs:['정상 뉴스 본문'],category:'IT·과학',published_at:new Date().toISOString(),is_synthetic:false,is_liked:false}]};
-  }else if(req.url?.endsWith('/like')){likes.push({reader_id:req.headers.cookie?.split('=')[1]});payload={article_id:req.url.split('/')[3],is_liked:req.method==='PUT',changed:true};}
+  }else if(req.method==='GET'&&req.url?.startsWith('/api/news/')){payload={request_id:randomUUID(),served_at:new Date().toISOString(),content:{article_id:req.url.split('/')[3],title:'상세 기사',paragraphs:['정상 뉴스 본문'],category:'IT·과학',published_at:new Date().toISOString(),is_synthetic:false,is_liked:false}};}else if(req.url?.endsWith('/like')){likes.push({reader_id:req.headers.cookie?.split('=')[1]});payload={article_id:req.url.split('/')[3],is_liked:req.method==='PUT',changed:true};}
   else{res.writeHead(404);res.end();return;}
   if(req.url==='/api/user/anonymous')res.setHeader('Set-Cookie',`news_reader=${payload.reader_id}; Path=/; HttpOnly`);
   res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify(payload));

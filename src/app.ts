@@ -1,13 +1,17 @@
-import type {Article, Feed, FeedItem} from './types.js';
-import {likeButton,seedBackendLikes} from './likes.js';
-import {getBackendPage,getBackendCategories,getBackendSubcategories,type FeedCursor} from './backend-api.js';
+import type {Article, ArticleSummary, Feed, FeedItem} from './types.js';
+import {likeButton,seedBackendLikes,backendLikeRevision} from './likes.js';
+import {getBackendArticle,getBackendPage,getBackendCategories,getBackendSubcategories,type FeedCursor} from './backend-api.js';
 import {initializeSyntheticEvents,recordSyntheticOpen} from './synthetic-events.js';
 import {initializeBehavior,connectBehavior} from './behavior-events.js';
 let pendingOpen:{articleId:string;impressionId:string}|null=null;
-const backendArticles=new Map<string, Article>();
+const backendArticles=new Map<string, ArticleSummary>();
 const main=document.querySelector('main')!;
 const behavior=connectBehavior(main);
 let feedScrollY=0;
+let detail:Article|null=null;
+let detailStatus='loading';
+let detailError='';
+let detailRequest=0;
 let categories: string[]=[];
 let subcategories: string[]=[];
 let subcategoryRequest=0;
@@ -33,7 +37,7 @@ const state={category:'전체',subcategory:'전체',status:'loading',feed:null a
 const selectedFilters=()=>({category:state.category==='전체'?null:state.category,subcategory:state.subcategory==='전체'?null:state.subcategory});
 const escape=(value: unknown)=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c as '&' | '<' | '>' | '"' | "'"]));
 const date=(value: string)=>new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',month:'long',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(value));
-const art=(article: Article,extra='')=>{let image='';if(article.imageUrl){try{const url=new URL(article.imageUrl,location.href);if(['http:','https:'].includes(url.protocol))image=`<img class="article-photo" src="${escape(url.href)}" alt="" loading="lazy">`;}catch{}}return `<div class="art art-${article.art} ${extra}" aria-hidden="true"><span class="orb"></span><span class="shape"></span><span class="art-word">${escape(article.category==='IT·과학'?'DISCOVER':article.category==='스포츠'?'MOVE':'EVERYDAY')}</span><span class="art-caption">SAI ORIGINAL · ILLUSTRATION</span>${image}</div>`;};
+const art=(article: ArticleSummary,extra='')=>{let image='';if(article.imageUrl){try{const url=new URL(article.imageUrl,location.href);if(['http:','https:'].includes(url.protocol))image=`<img class="article-photo" src="${escape(url.href)}" alt="" loading="lazy">`;}catch{}}return `<div class="art art-${article.art} ${extra}" aria-hidden="true"><span class="orb"></span><span class="shape"></span><span class="art-word">${escape(article.category==='IT·과학'?'DISCOVER':article.category==='스포츠'?'MOVE':'EVERYDAY')}</span><span class="art-caption">SAI ORIGINAL · ILLUSTRATION</span>${image}</div>`;};
 main.addEventListener('error',event=>{if(event.target instanceof Element&&event.target.matches('.article-photo'))event.target.remove();},true);
 function card(item: FeedItem){const a=item.article;return `<div class="news-row"><a class="card" href="#article/${encodeURIComponent(a.id)}" data-article="${escape(a.id)}" data-impression-id="${escape(a.impressionId??'')}">${art(a)}<div class="card-copy"><div class="eyebrow"><span>${escape(a.category)}</span><span class="fiction">${a.synthetic?'가상 기사':'뉴스 기사'}</span></div><h3>${escape(a.title)}</h3><p>${escape(a.summary)}</p><div class="article-date"><span class="publisher">${escape(a.publisher)}</span> · ${date(a.publishedAt)}</div><div class="reason"><span>↗</span> ${escape(item.reason)}</div></div></a>${likeButton(a.id)}</div>`;}
 function render(){
@@ -75,7 +79,7 @@ function connectMore(){
 }
 async function loadMore(){
   if(!state.feed||loadingMore||nextCursor===null||state.articleId||state.status!=='ready')return;
-  const token=state.request;
+  const token=state.request,likesAtStart=backendLikeRevision();
   const cursor=nextCursor;
   loadingMore=true;moreError='';
   const panel=main.querySelector('#pagination');
@@ -85,7 +89,7 @@ async function loadMore(){
     if(token!==state.request)return;
     const known=new Set(state.feed.items.map(item=>item.article.id));
     const added=page.items.filter(item=>!known.has(item.article.id));
-    state.feed.items.push(...added);nextCursor=page.nextCursor;added.forEach(item=>backendArticles.set(item.article.id,item.article));seedBackendLikes(added);
+    state.feed.items.push(...added);nextCursor=page.nextCursor;added.forEach(item=>backendArticles.set(item.article.id,item.article));seedBackendLikes(added,false,likesAtStart);
     if(!state.articleId)main.querySelector('.cards')?.insertAdjacentHTML('beforeend',added.map(card).join(''));behavior.observe();
   }catch(error){if(token!==state.request)return;moreError=error instanceof Error ? error.message : String(error);}
   finally{
@@ -93,10 +97,10 @@ async function loadMore(){
   }
 }
 async function load(){
-  const token=++state.request;state.status='loading';nextCursor=null;loadingMore=false;moreError='';render();
+  const token=++state.request,likesAtStart=backendLikeRevision();state.status='loading';nextCursor=null;loadingMore=false;moreError='';render();
   try{
     const feed=await getBackendPage(null,{filters:selectedFilters()});if(token!==state.request)return;
-    state.feed=feed;nextCursor=feed.nextCursor;backendArticles.clear();feed.items.forEach(item=>backendArticles.set(item.article.id,item.article));seedBackendLikes(feed.items,true);state.status='ready';
+    state.feed=feed;nextCursor=feed.nextCursor;backendArticles.clear();feed.items.forEach(item=>backendArticles.set(item.article.id,item.article));seedBackendLikes(feed.items,true,likesAtStart);state.status='ready';
   }
   catch(error){if(token!==state.request)return;state.status='error';state.error=error instanceof Error ? error.message : String(error);}
   render();
@@ -112,25 +116,51 @@ async function loadCategories(){
 }
 async function initialize(){
   categories=['전체'];
-  await Promise.all([load(),loadCategories()]);
+  await Promise.all([state.articleId?loadArticle():load(),loadCategories()]);
 }
 async function loadSubcategories(category: string){
  const token=++subcategoryRequest;
  try{const list=await getBackendSubcategories(category);if(token!==subcategoryRequest||state.category!==category)return;subcategories=list;categoryError='';render();}
  catch(error){if(token!==subcategoryRequest||state.category!==category)return;categoryError=error instanceof Error?error.message:String(error);render();}
 }
-function renderArticle(){if(state.articleId===null)return;const a=backendArticles.get(state.articleId);if(!a){main.innerHTML='<div class="empty"><h1>기사를 찾을 수 없어요</h1><a href="#">뉴스 피드로 돌아가기</a></div>';return;}
-  main.innerHTML=`<article class="article-page" data-impression-id="${escape(a.impressionId??'')}"><a class="back" href="#">← 뉴스 피드로 돌아가기</a><div class="eyebrow"><span>${escape(a.category)}</span><span class="fiction">${a.synthetic?'가상 기사':'뉴스 기사'}</span></div><h1>${escape(a.title)}</h1><p class="article-summary">${escape(a.summary)}</p>${likeButton(a.id)}<div class="byline">${escape(a.publisher)} <span>${date(a.publishedAt)} KST</span></div>${art(a,'article-art')}<p class="illustration-note">기사 내용을 표현한 그래픽 일러스트</p><div class="article-body">${a.body.split('\n\n').map(p=>`<p>${escape(p)}</p>`).join('')}</div><aside class="source-note"><strong>백엔드 뉴스 API에서 받은 기사입니다.</strong><p>기사의 가상 여부는 상단 표기를 확인해 주세요.</p></aside><a class="back bottom-back" href="#">← 뉴스 피드로 돌아가기</a></article>`;
+async function loadArticle(){
+ const id=state.articleId;if(id===null)return;
+ const token=++detailRequest,likesAtStart=backendLikeRevision();detail=null;detailStatus='loading';detailError='';render();
+ try{
+  const result=await getBackendArticle(id);
+  if(token!==detailRequest||state.articleId!==id)return;
+  detail=result.article;detailStatus='ready';
+  // A detail response started before a like completed must not undo that mutation.
+  seedBackendLikes([{article:detail,rank:0,reason:'',isLiked:result.isLiked}],false,likesAtStart);
+ }catch(error){
+  if(token!==detailRequest||state.articleId!==id)return;
+  detailStatus='error';detailError=error instanceof Error?error.message:String(error);
+ }
+ render();
+}
+function renderArticle(){
+ if(state.articleId===null)return;
+ if(detailStatus==='loading'){main.innerHTML='<div class="empty" role="status"><p>기사 본문을 불러오고 있어요…</p><a class="back" href="#">뉴스 피드로 돌아가기</a></div>';return;}
+ if(detailStatus==='error'||!detail){
+  const missing=detailError==='BACKEND_HTTP_404';
+  main.innerHTML=`<div class="empty" role="alert"><h1>${missing?'기사를 찾을 수 없어요':'기사 본문을 불러오지 못했어요'}</h1><p>${missing?'삭제되었거나 존재하지 않는 기사입니다.':'잠시 후 다시 시도해 주세요.'}</p><button id="detail-retry" class="primary">다시 시도</button><a class="back" href="#">뉴스 피드로 돌아가기</a></div>`;
+  main.querySelector('#detail-retry')?.addEventListener('click',()=>void loadArticle());return;
+ }
+ const a=detail;
+  main.innerHTML=`<article class="article-page" data-impression-id="${escape(backendArticles.get(a.id)?.impressionId??'')}"><a class="back" href="#">← 뉴스 피드로 돌아가기</a><div class="eyebrow"><span>${escape(a.category)}</span><span class="fiction">${a.synthetic?'가상 기사':'뉴스 기사'}</span></div><h1>${escape(a.title)}</h1><p class="article-summary">${escape(a.summary)}</p>${likeButton(a.id)}<div class="byline">${escape(a.publisher)} <span>${date(a.publishedAt)} KST</span></div>${art(a,'article-art')}<p class="illustration-note">기사 내용을 표현한 그래픽 일러스트</p><div class="article-body">${a.body.split('\n\n').map(p=>`<p>${escape(p)}</p>`).join('')}</div><aside class="source-note"><strong>백엔드 뉴스 API에서 받은 기사입니다.</strong><p>기사의 가상 여부는 상단 표기를 확인해 주세요.</p></aside><a class="back bottom-back" href="#">← 뉴스 피드로 돌아가기</a></article>`;
 }
 window.addEventListener('hashchange',()=>{
-  const articleId=location.hash.startsWith('#article/')?decodeURIComponent(location.hash.slice(9)):null;
+  const articleId=articleFromHash();
   if(articleId===state.articleId)return;
-  state.articleId=articleId;
-  render();
+  state.articleId=articleId;++detailRequest;
+  if(articleId)void loadArticle();
+  else if(!state.feed)void load();
+  else render();
   main.focus({preventScroll:true});
   if(articleId&&pendingOpen?.articleId===articleId&&backendArticles.has(articleId))void recordSyntheticOpen(pendingOpen.impressionId);
   pendingOpen=null;
   requestAnimationFrame(()=>window.scrollTo({top:state.articleId?0:feedScrollY,left:0,behavior:'instant'}));
 });
-state.articleId=location.hash.startsWith('#article/')?decodeURIComponent(location.hash.slice(9)):null;
+function articleFromHash(){try{return location.hash.startsWith('#article/')?decodeURIComponent(location.hash.slice(9)):null;}catch{return null;}}
+state.articleId=articleFromHash();
 void Promise.all([initializeSyntheticEvents(),initializeBehavior()]).then(initialize).catch(error=>{state.status='error';state.error=error instanceof Error?error.message:String(error);render();});
