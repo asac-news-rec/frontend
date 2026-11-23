@@ -52,7 +52,7 @@ npm run build
 docker compose config
 ```
 
-Docker 실행은 `docker compose up -d --build --wait`이며 접속 주소는 `http://127.0.0.1:4181/`입니다. 로컬 `npm start`는 `http://127.0.0.1:4173/`을 사용합니다. Docker 실행과 `node scripts/verify-docker.mjs`는 Docker Desktop이 준비된 경우에만 수행합니다. 문서만 바뀐 PR은 `git diff --check`와 경로·링크 검증을 먼저 합니다.
+Docker 실행은 `docker compose up -d --build --wait`이며 로컬 Nginx 접속 주소는 `http://127.0.0.1:8080/`입니다. 로컬 `npm start`는 `http://127.0.0.1:4173/`을 사용합니다. Docker 실행과 `node scripts/verify-docker.mjs`는 Docker Desktop과 로컬 FastAPI가 준비된 경우에만 수행합니다. 문서만 바뀐 PR은 `git diff --check`와 경로·링크 검증을 먼저 합니다.
 
 ## PR 리뷰
 

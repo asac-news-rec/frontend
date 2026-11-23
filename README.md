@@ -8,19 +8,19 @@
 
 ## 로컬 실행
 
-Node.js 24.21.0이 필요합니다. 백엔드 저장소 안내에 따라 PostgreSQL·API·Nginx를 먼저 실행합니다. 백엔드 Nginx는 기본 http://127.0.0.1:8080/ 입니다.
+Node.js 24.21.0이 필요합니다. 백엔드 저장소 안내에 따라 PostgreSQL·API를 먼저 실행하고, 아래 Docker 로컬 실행 절차로 프런트 Nginx를 실행합니다. Nginx는 기본 http://127.0.0.1:8080/ 입니다.
 
 ```powershell
 npm ci
 # 기본 백엔드: http://127.0.0.1:8080/
-# 다른 PC·포트의 백엔드 Nginx를 사용할 때만 설정합니다.
+# 다른 PC·포트의 프런트 Nginx를 사용할 때만 설정합니다.
 $env:NEWS_BACKEND_URL='http://127.0.0.1:8080/'
 npm start
 ```
 
 접속: http://127.0.0.1:4173/ (`npm run dev`도 동일). 소스를 수정하면 서버를 종료하고 다시 시작합니다. 현재 자동 재빌드 기능은 없습니다.
 
-브라우저 요청은 백엔드 참고 화면과 동일하게 `/api/v1/news/feed`, `/api/v1/category`, `/api/v1/subcategory`, `/api/v1/user/anonymous`, `/api/v1/news/{article_id}/like`를 사용합니다. 로컬 개발 서버는 이 경로와 `/images/*`를 백엔드 Nginx로 그대로 전달합니다. `NEWS_BACKEND_URL`은 `/api/`가 없는 Nginx 루트 주소입니다. FastAPI의 8000 포트가 아니라 Nginx의 8080 포트를 사용합니다. `PUBLIC_ORIGIN`을 지정한다면 실제 브라우저 주소와 일치시켜야 합니다. 기본 실행에서는 `127.0.0.1`을 사용합니다.
+브라우저 요청은 백엔드 참고 화면과 동일하게 `/api/v1/news/feed`, `/api/v1/category`, `/api/v1/subcategory`, `/api/v1/user/anonymous`, `/api/v1/news/{article_id}/like`를 사용합니다. 로컬 개발 서버는 이 경로와 `/images/*`를 프런트 Nginx로 그대로 전달합니다. Node 개발 서버용 `NEWS_BACKEND_URL`은 `/api/`가 없는 Nginx 루트 주소입니다. FastAPI의 8000 포트가 아니라 Nginx의 8080 포트를 사용합니다. `PUBLIC_ORIGIN`을 지정한다면 실제 브라우저 주소와 일치시켜야 합니다. 기본 실행에서는 `127.0.0.1`을 사용합니다.
 
 백엔드가 꺼져 있으면 연결 오류를 표시합니다. 샘플 데이터로 자동 대체하지 않습니다. 로컬 서버는 화면 파일과 백엔드 프록시만 제공하며 SQLite·방문자 쿠키 API를 실행하지 않습니다. `.local/`은 개발·기존 회귀 테스트용 컴파일 결과이며 배포하지 않습니다.
 
@@ -33,13 +33,37 @@ npm start
 ## Docker 로컬 실행 (선택)
 
 ```powershell
-# Docker Desktop과 백엔드를 먼저 실행합니다.
-$env:NEWS_BACKEND_URL='http://host.docker.internal:8080/'
+# Docker Desktop과 백엔드 PostgreSQL·FastAPI를 먼저 실행합니다.
+# 백엔드 Compose에 Nginx가 남아 있다면 실행하지 않습니다.
 docker compose up -d --build --wait
 node scripts/verify-docker.mjs
 ```
 
-접속: http://127.0.0.1:4181/ . 종료: `docker compose down`. Docker Compose는 `local` 빌드 타깃을 사용하며 개발 서버만 실행합니다. 기존 `visitor-data` 볼륨은 연결하거나 삭제하지 않습니다. 데이터가 필요할 수 있으므로 `down -v`를 사용하지 않습니다.
+접속: http://127.0.0.1:8080/ . 종료: `docker compose down`. Docker Compose는 `local-nginx` 빌드 타깃으로 빌드된 정적 화면을 제공합니다. 소스 변경 후에는 다시 빌드합니다. `/api/` 접두사를 제거해 FastAPI로 전달합니다(예: `/api/v1/category` → `/v1/category`). 기본 대상은 `host.docker.internal:8000`이며 Docker Desktop에서 호스트에 공개한 FastAPI 포트를 사용합니다. Linux에서는 해당 호스트 게이트웨이에서 FastAPI에 접근할 수 있어야 합니다.
+
+포트를 바꿀 때는 실행과 검증을 같은 PowerShell 세션에서 수행합니다. `FASTAPI_UPSTREAM`에는 스킴·경로 없이 `호스트:포트`를 지정합니다. Compose는 Node 개발 서버용 `NEWS_BACKEND_URL`을 사용하지 않습니다.
+
+```powershell
+$env:NEWS_PORT='8089'
+$env:FASTAPI_UPSTREAM='host.docker.internal:8008'
+docker compose -p frontend-nginx-check up -d --build --wait
+node scripts/verify-docker.mjs
+docker compose -p frontend-nginx-check down
+Remove-Item Env:NEWS_PORT, Env:FASTAPI_UPSTREAM
+```
+
+Nginx 컨테이너의 healthcheck는 정적 화면만 확인합니다. 검증 스크립트는 `/api/health`의 200 응답도 검사하므로 FastAPI가 필요합니다. 기본 Nginx 구성은 행동 수집 게이트웨이를 실행하지 않습니다. 로컬 행동 수집 작업은 기존 Node 개발 서버 절차를 사용합니다.
+
+생성 이미지가 있으면 기존 디렉터리를 읽기 전용으로 연결합니다. 마운트가 없으면 `/images/`는 404이며 화면은 기본 일러스트를 표시합니다. 경로가 없으면 override 실행은 실패하며 디렉터리를 자동 생성하지 않습니다.
+
+```powershell
+$env:NEWS_IMAGES_DIR=(Resolve-Path '../backend/generate/local_generate/output_with_thumbnail').Path
+docker compose -f compose.yaml -f compose.images.yaml up -d --build --wait
+# 종료할 때도 같은 -f 옵션을 사용합니다.
+docker compose -f compose.yaml -f compose.images.yaml down
+```
+
+운영 `production` 타깃의 Nginx 80 → FastAPI 8000 설정은 바뀌지 않습니다. 기존 `visitor-data` 볼륨은 연결하거나 삭제하지 않습니다. 데이터가 필요할 수 있으므로 `down -v`를 사용하지 않습니다.
 
 Node가 설치되지 않은 빌드 환경에서는 Docker로 정적 결과만 추출할 수도 있습니다.
 

@@ -1,0 +1,10 @@
+# Optional generated image directory. See README before enabling this override.
+services:
+  web:
+    volumes:
+      - type: bind
+        source: ${NEWS_IMAGES_DIR:?Set NEWS_IMAGES_DIR to an existing image directory}
+        target: /srv/images
+        read_only: true
+        bind:
+          create_host_path: false
