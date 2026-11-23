@@ -4,6 +4,7 @@ import shutil
 import sqlite3
 import subprocess
 import time
+from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from pathlib import Path
@@ -110,6 +111,40 @@ def test_file_atomic_commit_duplicate_and_conflict(client):
     assert mixed.status_code == 200
     assert [result["status"] for result in mixed.json()["results"]] == ["duplicate", "accepted"]
     assert client.get("/ready").json()["served"] == 2
+
+
+@pytest.mark.parametrize("via_file", [False, True])
+def test_backend_microsecond_served_time_is_normalized_and_deduplicated(client, via_file):
+    # Match the real FastAPI response, not JavaScript's millisecond-only fixture.
+    instant = datetime.now(timezone.utc).replace(microsecond=654367)
+    row = {**record(), "served_at": instant.isoformat()}
+    post = (lambda value: upload(client, [value])) if via_file else (
+        lambda value: client.post("/internal/served", json={"records": [value]}))
+    response = post(row)
+    assert response.status_code == 200
+    assert response.json()["results"][0]["status"] == "accepted"
+    stored = client.app.state.store.get("served_records", "impression_id", row["impression_id"])
+    normalized = instant.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    assert json.loads(stored["canonical_json"])["served_at"] == normalized
+    assert post(row).json()["results"][0]["status"] == "duplicate"
+    assert post({**row, "served_at": normalized}).json()["results"][0]["status"] == "duplicate"
+    assert send(client, [event()]).json()["results"][0]["status"] == "accepted"
+
+
+def test_served_microsecond_support_keeps_invalid_times_and_actions_strict(client):
+    for value, code in [
+        ("2026-11-23T00:00:00.1234567Z", "INVALID_TIME"),
+        ("2026-11-23T00:00:00.123456", "INVALID_TIME"),
+        ("2026-02-30T00:00:00.123456Z", "INVALID_TIME"),
+        ("2000-01-01T00:00:00.123456Z", "TIME_OUT_OF_RANGE"),
+    ]:
+        row = {**record(), "served_at": value}
+        ack = client.post("/internal/served", json={"records": [row]}).json()["results"][0]
+        assert ack["status"] == "rejected"
+        assert ack["code"] == code
+    accept(client)
+    action = event(event_time=datetime.now(timezone.utc).replace(microsecond=654367).isoformat())
+    assert send(client, [action]).json()["results"][0]["code"] == "INVALID_TIME"
 
 
 def test_revoked_row_rolls_back_whole_file(client):

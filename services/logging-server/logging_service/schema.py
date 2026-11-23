@@ -37,9 +37,10 @@ def shape(value, keys):
         raise InputError("UNKNOWN_FIELD")
 
 
-def timestamp(value, now=None):
+def timestamp(value, now=None, *, allow_microseconds=False):
+    precision = 6 if allow_microseconds else 3
     if not isinstance(value, str) or not re.fullmatch(
-        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})", value
+        rf"\d{{4}}-\d{{2}}-\d{{2}}T\d{{2}}:\d{{2}}:\d{{2}}(?:\.\d{{1,{precision}}})?(?:Z|[+-]\d{{2}}:\d{{2}})", value
     ):
         raise InputError("INVALID_TIME")
     try:
@@ -71,7 +72,8 @@ def served(value, now):
     position = value.get("position")
     if type(position) is not int or not 1 <= position <= 9007199254740991:
         raise InputError("INVALID_POSITION")
-    result.update(position=position, served_at=timestamp(value.get("served_at"), now))
+    # FastAPI emits microseconds; keep stored times/hashes at the existing millisecond unit.
+    result.update(position=position, served_at=timestamp(value.get("served_at"), now, allow_microseconds=True))
     if "score" in value:
         score = value["score"]
         if score is not None and (type(score) not in (int, float) or not -float_info.max <= score <= float_info.max):
