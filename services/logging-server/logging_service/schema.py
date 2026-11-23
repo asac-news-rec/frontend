@@ -40,7 +40,7 @@ def shape(value, keys):
 def timestamp(value, now=None, *, allow_microseconds=False):
     precision = 6 if allow_microseconds else 3
     if not isinstance(value, str) or not re.fullmatch(
-        rf"\d{{4}}-\d{{2}}-\d{{2}}T\d{{2}}:\d{{2}}:\d{{2}}(?:\.\d{{1,{precision}}})?(?:Z|[+-]\d{{2}}:\d{{2}})", value
+        rf"\d{{4}}-\d{{2}}-\d{{2}}T\d{{2}}:\d{{2}}:\d{{2}}(?:\.\d{{1,{precision}}})?(?:Z|[+-]\d{{2}}:\d{{2}})", value, flags=re.ASCII
     ):
         raise InputError("INVALID_TIME")
     try:

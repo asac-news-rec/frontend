@@ -4,7 +4,7 @@ import shutil
 import sqlite3
 import subprocess
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from pathlib import Path
@@ -145,6 +145,56 @@ def test_served_microsecond_support_keeps_invalid_times_and_actions_strict(clien
     accept(client)
     action = event(event_time=datetime.now(timezone.utc).replace(microsecond=654367).isoformat())
     assert send(client, [action]).json()["results"][0]["code"] == "INVALID_TIME"
+
+
+@pytest.mark.parametrize("via_file", [False, True])
+def test_served_precision_identity_and_offset_contract(client, via_file):
+    instant = datetime.now(timezone.utc).replace(microsecond=123456)
+    row = {**record(), "served_at": instant.isoformat()}
+    post = (lambda value: upload(client, [value])) if via_file else (
+        lambda value: client.post("/internal/served", json={"records": [value]}))
+    assert post(row).json()["results"][0]["status"] == "accepted"
+    for equivalent in [instant.replace(microsecond=123999), instant.astimezone(timezone(timedelta(hours=9)))]:
+        assert post({**row, "served_at": equivalent.isoformat()}).json()["results"][0]["status"] == "duplicate"
+    # New impressions remain distinct even when their normalized time is identical.
+    assert post({**row, "impression_id": "imp-new"}).json()["results"][0]["status"] == "accepted"
+    for change in [{"served_at": instant.replace(microsecond=124000).isoformat()}, {"article_id": "other-article"}]:
+        response = post({**row, **change})
+        if via_file:
+            assert response.status_code == 400
+            assert response.json()["error"] == "IMPRESSION_ID_CONFLICT"
+        else:
+            assert response.json()["results"][0]["code"] == "IMPRESSION_ID_CONFLICT"
+
+
+@pytest.mark.parametrize("via_file", [False, True])
+def test_served_zero_fraction_and_millisecond_window(client, via_file):
+    now = 1795396800000
+    client.app.state.store.now = lambda: now
+    post = (lambda value: upload(client, [value])) if via_file else (
+        lambda value: client.post("/internal/served", json={"records": [value]}))
+    zero = datetime.fromtimestamp(now / 1000, timezone.utc)
+    row = {**record(), "served_at": zero.isoformat()}
+    assert post(row).json()["results"][0]["status"] == "accepted"
+    assert post({**row, "served_at": zero.isoformat(timespec="microseconds")}).json()["results"][0]["status"] == "duplicate"
+    for index, (delta_us, accepted) in enumerate([
+        (-86400000 * 1000 - 1, False), (-86400000 * 1000, True),
+        (-86400000 * 1000 + 999, True), (300000 * 1000, True),
+        (300000 * 1000 + 999, True), (300001 * 1000, False),
+    ]):
+        value = {**row, "impression_id": f"boundary-{index}", "served_at": (zero + timedelta(microseconds=delta_us)).isoformat()}
+        response = post(value)
+        if accepted:
+            assert response.status_code == 200
+            assert response.json()["results"][0]["status"] == "accepted"
+        elif via_file:
+            assert response.status_code == 400
+            assert response.json()["error"] == "TIME_OUT_OF_RANGE"
+        else:
+            assert response.json()["results"][0]["code"] == "TIME_OUT_OF_RANGE"
+    unicode_time = zero.isoformat().replace("2026", "２０２６")
+    response = post({**row, "served_at": unicode_time})
+    assert (response.json()["error"] if via_file else response.json()["results"][0]["code"]) == "INVALID_TIME"
 
 
 def test_revoked_row_rolls_back_whole_file(client):
