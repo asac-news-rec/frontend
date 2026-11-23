@@ -54,7 +54,15 @@ Remove-Item Env:NEWS_PORT, Env:FASTAPI_UPSTREAM
 
 Nginx 컨테이너의 healthcheck는 정적 화면만 확인합니다. 검증 스크립트는 `/api/health`의 200 응답도 검사하므로 FastAPI가 필요합니다. 기본 Nginx 구성은 행동 수집 게이트웨이를 실행하지 않습니다. 로컬 행동 수집 작업은 기존 Node 개발 서버 절차를 사용합니다.
 
+기본 8080은 기존 접속 주소를 유지하기 위한 선택입니다. 이미 백엔드 Nginx가 사용 중이라면 백엔드 폴더에서 `docker compose stop nginx`로 해당 서비스만 중지한 뒤 프런트를 실행합니다. 다른 프로젝트가 사용 중이면 해당 서비스를 임의로 중지하지 말고 위 예제처럼 `NEWS_PORT`를 변경합니다. 자동으로 다른 컨테이너를 중지하거나 포트를 변경하지 않습니다.
+
+`FASTAPI_UPSTREAM`은 시작 시 템플릿에 적용되고 호스트명도 Nginx 기동 시 해석됩니다. Compose에서 미설정 또는 빈 값은 기본값으로 대체합니다. 직접 이미지 실행 시 빈 값 또는 `http://` 스킴은 잘못된 설정으로 기동 실패할 수 있고, 경로가 포함되면 전달 경로가 달라지므로 반드시 `호스트:포트`만 지정합니다. 호스트명은 해석되지만 FastAPI가 꺼져 있으면 화면은 제공되며 API 요청은 연결 거절 시 502(연결 시간 초과 시 504)입니다. 같은 주소에서 FastAPI가 복구되면 다음 요청부터 연결됩니다. 호스트 IP가 바뀌면 Nginx를 재시작합니다.
+
+`/api/v1/category?x=1`은 `/v1/category?x=1`, `/api/`는 `/`로 전달됩니다. `/api`는 먼저 `/api/`로 301 리다이렉트되므로 클라이언트는 처음부터 슬래시가 있는 API 주소를 사용해야 합니다. health 계약은 [백엔드 실행 안내](https://github.com/asac-news-rec/backend/blob/main/README.md)의 상태 확인 주소(`/api/health`, 직접 실행 `/health`)를 따릅니다. 로컬 HTTP의 익명 쿠키를 사용하려면 백엔드의 `READER_COOKIE_SECURE=false` 설정이 필요합니다. Nginx는 쿠키 속성을 수정하지 않습니다.
+
 생성 이미지가 있으면 기존 디렉터리를 읽기 전용으로 연결합니다. 마운트가 없으면 `/images/`는 404이며 화면은 기본 일러스트를 표시합니다. 경로가 없으면 override 실행은 실패하며 디렉터리를 자동 생성하지 않습니다.
+
+이전 백엔드 Nginx와 동일한 `location /images/` + `alias /srv/images/` 매핑입니다. 예를 들어 `/images/day/a%20b.svg`는 마운트 루트의 `day/a b.svg`를 읽습니다. 마운트가 없거나 해당 파일이 없으면 404이며, 디렉터리가 존재하지만 index 파일이 없으면 목록을 노출하지 않고 403을 반환합니다.
 
 ```powershell
 $env:NEWS_IMAGES_DIR=(Resolve-Path '../backend/generate/local_generate/output_with_thumbnail').Path
