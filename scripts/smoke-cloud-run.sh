@@ -29,7 +29,7 @@ api=$(docker run -d -p 127.0.0.1::80 node:24.21.0-bookworm-slim node -e '
 nginx=$(docker run -d --network "container:$api" "$image")
 address=$(docker port "$api" 80/tcp)
 
-curl --fail --silent --show-error --retry 10 --retry-connrefused --max-time 5 \
+curl --fail --silent --show-error --retry 10 --retry-all-errors --retry-delay 1 --retry-max-time 30 --max-time 5 \
   "http://$address/" | grep -F '/src/app.js' >/dev/null
 curl --fail --silent --show-error --max-time 5 "http://$address/src/app.js" >/dev/null
 curl --fail --silent --show-error --max-time 5 "http://$address/src/style.css" >/dev/null

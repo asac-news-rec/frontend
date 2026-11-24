@@ -25,8 +25,8 @@ gateway=$(docker run -d --network "container:$api" \
  -e LOGGING_TOKEN=fixture-application-token-only "$gateway_image")
 nginx=$(docker run -d --network "container:$api" "$nginx_image")
 address=$(docker port "$api" 80/tcp)
-curl --fail --silent --show-error --retry 10 --retry-connrefused --max-time 5 "http://$address/" >/dev/null
-curl --fail --silent --show-error --retry 10 --max-time 5 "http://$address/api/behavior/status" | grep -F '"enabled":true' >/dev/null
+curl --fail --silent --show-error --retry 10 --retry-all-errors --retry-delay 1 --retry-max-time 30 --max-time 5 "http://$address/" >/dev/null
+curl --fail --silent --show-error --retry 10 --retry-all-errors --retry-delay 1 --retry-max-time 30 --max-time 5 "http://$address/api/behavior/status" | grep -F '"enabled":true' >/dev/null
 headers=$(curl --fail --silent --show-error --request POST --dump-header - --output /dev/null \
  -H 'Origin: https://smoke.example' "http://$address/api/v1/user/anonymous")
 printf '%s' "$headers" | grep -iF 'Set-Cookie: news_reader=fixture-proof' >/dev/null

@@ -21,3 +21,7 @@
 7. 정기 실행 cron·첫 구간 합의. 소비자는 UTC 수신 구간 경로의 .jsonl.gz와 작업별 manifest를 읽도록 연결
 
 Terraform apply, IAM 확대, 버킷 생성, 실제 DB 데이터 변경은 이 작업에서 실행하지 않았습니다. 인프라 요청은 저장소의 infra-request 양식에 따라 이 값의 **키 이름과 필요한 권한만** 전달하면 됩니다.
+
+## served_at 입력 정밀도 호환
+
+뉴스 FastAPI가 보내는 `served_at`은 소수점 최대 6자리와 명시적 시간대를 허용합니다. 로깅 수신 시 UTC 밀리초로 정규화하고 4~6번째 자리는 버립니다. PostgreSQL·JSONL 저장과 해시·중복 판정은 기존 밀리초 단위를 유지합니다. 이 입력 확장은 `/internal/served`와 `/internal/served-file`에 동일하게 적용하며, 행동 시각의 최대 3자리 계약과 수신 시각 기준 Airflow 구간은 바뀌지 않습니다.
