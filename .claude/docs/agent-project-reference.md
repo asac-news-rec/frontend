@@ -14,7 +14,8 @@ tests/               피드·방문자·좋아요 테스트
 scripts/             검사, 빌드, Docker 검증
 docs/                화면 설계, 프론트·백엔드 계약, 행동 수집 설계
 Dockerfile           로컬 개발 컨테이너 및 정적 파일 추출
-compose.yaml         로컬 개발 서버 (기존 볼륨 미사용)
+compose.yaml         로컬 Nginx (기존 볼륨 미사용)
+compose.images.yaml  생성 이미지 읽기 전용 마운트 (선택)
 README.md            실행 방법과 현재 한계
 CLAUDE.md            에이전트 진입점
 AGENTS.md            Windows 호환을 위한 동일 내용의 사본
@@ -23,7 +24,7 @@ AGENTS.md            Windows 호환을 위한 동일 내용의 사본
 .github/             이슈·PR 양식과 브랜치 이름 검사
 ```
 
-브라우저와 로컬 서버 소스는 TypeScript입니다. `npm run build`는 브라우저 의존성만 `dist/`에 출력합니다. `npm start`는 `.local/dev-server.js`에서 개발 프록시를 실행하며 SQLite를 초기화하지 않습니다. 기존 서버는 `.local/`에 컴파일되어 회귀 테스트에서만 사용합니다. 기존 백엔드 Nginx를 그대로 사용하며, 배포 계약은 `docs/contracts/frontend-deployment.md`입니다.
+브라우저와 로컬 서버 소스는 TypeScript입니다. `npm run build`는 브라우저 의존성만 `dist/`에 출력합니다. `npm start`는 `.local/dev-server.js`에서 개발 프록시를 실행하며 SQLite를 초기화하지 않습니다. 기존 서버는 `.local/`에 컴파일되어 회귀 테스트에서만 사용합니다. 로컬 Compose는 프런트 Nginx로 정적 화면과 FastAPI 전달을 제공하며, 배포 계약은 `docs/contracts/frontend-deployment.md`입니다.
 
 Windows Git에서 `core.symlinks=false`이면 `.agents`가 링크 대상 문자열을 담은 일반 파일로 체크아웃될 수 있습니다. 이 경우 `.claude/docs/`를 직접 사용합니다. `AGENTS.md`와 `CLAUDE.md`는 내용이 같아야 합니다.
 

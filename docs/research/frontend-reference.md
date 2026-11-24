@@ -142,7 +142,7 @@
 4. 수집 실패·재시도·삭제·숨긴 탭·빠른 클릭·상세 복귀를 브라우저에서 검증한다. 클라이언트와 서버의 이벤트 ID를 대조한다.
 5. 추천 API를 `service.js`에 연결한다. 기본 추천과 개인화 추천의 상태·근거·생성 시각을 실제 응답에 맞게 표시한다.
 
-현재 프론트엔드 package.json의 명령은 `npm run check`, `npm test`, `npm run build`, `npm start`다. README의 Docker 실행은 `docker compose up -d --build --wait`이고 접속 주소는 `http://127.0.0.1:4181/`이다. 이 문서 작성 중 명령을 실행하지 않았다. 자동 검사에 더해 실제 브라우저와 서버 저장 결과로 수집 동작을 증명해야 한다.
+현재 프론트엔드 package.json의 명령은 `npm run check`, `npm test`, `npm run build`, `npm start`다. README의 Docker 실행은 `docker compose up -d --build --wait`이고 접속 주소는 `http://127.0.0.1:8080/`이다. 현재 Compose는 Nginx 80에서 정적 화면과 FastAPI 전달을 제공한다. Node 개발 서버는 `npm start`로 별도 실행한다. 이 문서 작성 중 명령을 실행하지 않았다. 자동 검사에 더해 실제 브라우저와 서버 저장 결과로 수집 동작을 증명해야 한다.
 
 ## 다음 개발 세션의 시작점
 

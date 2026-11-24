@@ -35,6 +35,12 @@ COPY --from=build /app/dist/ /usr/share/nginx/html/
 FROM production AS production-behavior
 COPY nginx/behavior-locations.conf /etc/nginx/behavior-locations.conf
 
+# Local Nginx owns static files, API forwarding and generated images.
+FROM nginx:stable-alpine AS local-nginx
+ENV FASTAPI_UPSTREAM=host.docker.internal:8000
+COPY nginx/local.conf.template /etc/nginx/templates/default.conf.template
+COPY --from=build /app/dist/ /usr/share/nginx/html/
+
 # docker build --target static --output type=local,dest=./site .
 FROM scratch AS static
 COPY --from=build /app/dist/ /

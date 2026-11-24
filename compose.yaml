@@ -2,15 +2,15 @@ services:
   web:
     build:
       context: .
-      target: local
+      target: local-nginx
     ports:
-      - "127.0.0.1:${NEWS_PORT:-4181}:4173"
+      - "127.0.0.1:${NEWS_PORT:-8080}:80"
     environment:
-      PUBLIC_ORIGIN: "http://127.0.0.1:${NEWS_PORT:-4181}"
-      NEWS_BACKEND_URL: ${NEWS_BACKEND_URL:-http://host.docker.internal:8080/}
-    init: true
+      FASTAPI_UPSTREAM: ${FASTAPI_UPSTREAM:-host.docker.internal:8000}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4173/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
       interval: 10s
       timeout: 5s
       start_period: 10s

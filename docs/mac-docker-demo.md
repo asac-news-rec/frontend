@@ -93,25 +93,30 @@ docker run -d --name asac-news-demo-images \
 
 이미지 컨테이너가 이미 있으면 중복 생성하지 말고 상태와 마운트를 확인하세요.
 
-## 4. 프론트엔드 실행 및 화면 확인
+## 4. 현재 프론트엔드 실행 및 화면 확인
+
+이 절은 Nginx 이관 이후 기준입니다. 위 1~3절의 과거 브랜치·DB 복원·별도 이미지 서버 절차는 현재 실행 안내가 아닙니다. 현재 main 기반 프런트와 백엔드 README를 따르고 PostgreSQL·FastAPI만 실행합니다. 백엔드 Nginx가 8080을 사용 중이면 백엔드 폴더에서 `docker compose stop nginx`로 해당 서비스만 중지합니다.
 
 ```zsh
 cd ~/asac-news-demo/frontend
-export NEWS_BACKEND_URL='http://host.docker.internal:8000/'
+export FASTAPI_UPSTREAM='host.docker.internal:8000'
+export NEWS_PORT=8080
 docker compose config --quiet
 docker compose up -d --build --wait
-curl -fsS -o /dev/null http://127.0.0.1:4181/
-curl -fsS http://127.0.0.1:8000/health
-open http://127.0.0.1:4181/
+curl -fsS -o /dev/null http://127.0.0.1:8080/
+curl -fsS http://127.0.0.1:8080/api/health
+open http://127.0.0.1:8080/
 ```
 
-Docker Desktop의 `host.docker.internal`은 프론트엔드 컨테이너에서 Mac의 8000 포트로 접근하기 위한 주소입니다. 브라우저 주소에는 쿼리 문자열이 필요하지 않습니다. 4181은 Mac에서 여는 프론트엔드 포트, 4173은 컨테이너 내부 포트입니다.
+Docker Desktop의 `host.docker.internal`은 호스트 FastAPI로 연결합니다. 호스트 8080 → Nginx 80이며, `/api/`를 제거해 FastAPI로 전달합니다. 다른 프로젝트가 8080을 사용하면 `NEWS_PORT`와 접속 주소를 함께 바꿉니다. `NEWS_BACKEND_URL`은 Node 개발 서버용이며 이 Compose에서는 사용하지 않습니다.
 
-화면에서 기사 목록과 썸네일을 보고, 기사 클릭·좋아요·새로고침 후 반영을 확인하세요. 카테고리 대분류 API 연결은 백엔드 담당자의 구현을 기다리는 중이므로, 그 부분을 완료된 것으로 시연하지 않습니다. 문제가 있으면 `docker compose logs --tail 100 web`(frontend), `docker compose logs --tail 100 api postgres`(backend), `docker logs asac-news-demo-images`를 확인하세요.
+이미지는 [README의 선택 마운트](../README.md#docker-로컬-실행-선택)를 따릅니다. `NEWS_IMAGES_DIR`에 실제 생성 이미지 디렉터리를 지정하고 `-f compose.yaml -f compose.images.yaml`을 사용합니다. 마운트가 없으면 기본 일러스트를 표시합니다. 로컬 HTTP 익명 쿠키에는 백엔드 `READER_COOKIE_SECURE=false`가 필요합니다.
+
+화면에서 목록·상세·쿠키 유지·좋아요·썸네일을 확인합니다. Mac 실행은 별도 검증이 필요합니다.
 
 ## 5. 종료와 재실행
 
-각 저장소에서 `docker compose down`으로 종료합니다. 이 명령은 DB 볼륨을 유지합니다. 별도로 띄운 이미지 컨테이너는 `docker stop asac-news-demo-images`로 중지합니다. 경량 API를 사용했다면 `docker stop asac-news-demo-api`로 중지합니다. 재시작할 때는 각 저장소에서 `docker compose up -d --wait`를 실행하고, 프론트엔드에는 위 `NEWS_BACKEND_URL`을 다시 설정합니다.
+프런트 폴더에서 실행할 때와 동일한 프로젝트 및 `-f` 옵션으로 `docker compose down`을 실행합니다. 재실행은 같은 환경변수와 옵션으로 `docker compose up -d --build --wait`를 사용합니다. `down -v`는 사용하지 않습니다. 과거 별도 API·이미지 컨테이너는 현재 Compose에서 관리하지 않습니다.
 
 ## 이 PC에서 실제 사용한 구성
 
