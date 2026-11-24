@@ -68,12 +68,13 @@ async function attempt(entry:{event:BehaviorEvent;created:number;attempts:number
  }
 }
 export function recordBehavior(kind:string,impressionId:string|undefined,page='list',extra:Partial<BehaviorEvent>={}){
- if(!collectionEnabled||!readerId||!impressionId)return;
+ if(!collectionEnabled||!readerId||!impressionId)return false;
  const event:BehaviorEvent={event_id:crypto.randomUUID(),event_type:kind,event_time:new Date().toISOString(),impression_id:impressionId,page_type:page,...extra};
  if(pending.size>=500)drop(pending.keys().next().value!,'QUEUE_LIMIT');
  while(pending.size&&new TextEncoder().encode(JSON.stringify([...pending.values()].map(e=>e.event))).length>520192)drop(pending.keys().next().value!,'QUEUE_LIMIT');
  const entry={event:JSON.parse(JSON.stringify(event)) as BehaviorEvent,created:Date.now(),attempts:0,inflight:false};
  pending.set(event.event_id,entry);persist();report();void attempt(entry);
+ return true;
 }
 export async function initializeBehavior(){
  readerId=null;collectionEnabled=false;pending.clear();
@@ -110,7 +111,15 @@ export function connectBehavior(main:HTMLElement){
  document.addEventListener('visibilitychange',()=>{if(document.hidden)stopAll();else resume();});
  window.addEventListener('pagehide',stopAll);
  window.addEventListener('pageshow',resume);
- function open(event:MouseEvent){const node=event.target instanceof Element?event.target.closest<HTMLElement>('a.card[data-impression-id]'):null;if(!node||!event.isTrusted||(event.type==='click'?event.button!==0:event.button!==1))return;stopAll();recordBehavior('article_open',node.dataset.impressionId);resume();}
- main.addEventListener('click',open);main.addEventListener('auxclick',open);
- return {beforeRender(){stopAll();observer.disconnect();visible.clear();},observe(){for(const node of main.querySelectorAll('.card[data-impression-id]'))observer.observe(node);}};
+ function recordOpen(impressionId:string|undefined){
+  stopAll();
+  const recorded=recordBehavior('article_open',impressionId);
+  resume();
+  return recorded;
+ }
+ main.addEventListener('auxclick',event=>{
+  const link=event.target instanceof Element?event.target.closest<HTMLAnchorElement>('a.card[data-impression-id]'):null;
+  if(link&&event.isTrusted&&event.button===1)recordOpen(link.dataset.impressionId);
+ });
+ return {recordOpen,beforeRender(){stopAll();observer.disconnect();visible.clear();},observe(){for(const node of main.querySelectorAll('.card[data-impression-id]'))observer.observe(node);}};
 }

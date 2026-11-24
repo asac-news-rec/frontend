@@ -2,8 +2,9 @@ import type {Article, ArticleSummary, Feed, FeedItem} from './types.js';
 import {likeButton,seedBackendLikes,backendLikeRevision} from './likes.js';
 import {getBackendArticle,getBackendPage,getBackendCategories,getBackendSubcategories,type FeedCursor} from './backend-api.js';
 import {initializeSyntheticEvents,recordSyntheticOpen} from './synthetic-events.js';
-import {initializeBehavior,connectBehavior} from './behavior-events.js';
-let pendingOpen:{articleId:string;impressionId:string}|null=null;
+import {initializeBehavior,connectBehavior,recordBehavior} from './behavior-events.js';
+let pendingOpen:{articleId:string;impressionId:string;recorded:boolean}|null=null;
+let openDetailImpressionId:string|null=null;
 const backendArticles=new Map<string, ArticleSummary>();
 const main=document.querySelector('main')!;
 const behavior=connectBehavior(main);
@@ -26,13 +27,22 @@ window.addEventListener('scroll',()=>{
 },{passive:true});
 main.addEventListener('click',event=>{
   pendingOpen=null;
-  if(event.isTrusted&&event.target instanceof Element&&!state.articleId&&event.button===0&&!event.ctrlKey&&!event.metaKey&&!event.shiftKey){
-    const link=event.target.closest<HTMLAnchorElement>('a[data-article]');
-    const articleId=link?.dataset.article,impressionId=link?.dataset.impressionId;
-    if(articleId&&impressionId)pendingOpen={articleId,impressionId};
-  }
-  if(!state.articleId&&event.target instanceof Element&&event.target.closest('a[data-article]')&&!event.ctrlKey&&!event.metaKey&&!event.shiftKey&&event.button===0)feedScrollY=window.scrollY;
+  if(state.articleId||event.button!==0||!(event.target instanceof Element))return;
+  const link=event.target.closest<HTMLAnchorElement>('a.card[data-article][data-impression-id]');
+  if(!link)return;
+  const {article:articleId,impressionId}=link.dataset;
+  const recorded=event.isTrusted&&behavior.recordOpen(impressionId);
+  if(event.defaultPrevented||event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;
+  feedScrollY=window.scrollY;
+  if(event.isTrusted&&articleId&&impressionId)pendingOpen={articleId,impressionId,recorded};
 });
+function closeDetail(){
+  const impressionId=openDetailImpressionId;
+  openDetailImpressionId=null;
+  if(impressionId)recordBehavior('article_close',impressionId,'detail');
+}
+// Queue the close before initializeBehavior registers its pagehide beacon flush.
+window.addEventListener('pagehide',closeDetail);
 const state={category:'전체',subcategory:'전체',status:'loading',feed:null as Feed | null,articleId:null as string | null,error:'',request:0};
 const selectedFilters=()=>({category:state.category==='전체'?null:state.category,subcategory:state.subcategory==='전체'?null:state.subcategory});
 const escape=(value: unknown)=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c as '&' | '<' | '>' | '"' | "'"]));
@@ -151,14 +161,17 @@ function renderArticle(){
 }
 window.addEventListener('hashchange',()=>{
   const articleId=articleFromHash();
+  const opened=pendingOpen?.articleId===articleId?pendingOpen:null;
+  pendingOpen=null;
   if(articleId===state.articleId)return;
+  closeDetail();
+  openDetailImpressionId=opened?.recorded?opened.impressionId:null;
   state.articleId=articleId;++detailRequest;
   if(articleId)void loadArticle();
   else if(!state.feed)void load();
   else render();
   main.focus({preventScroll:true});
-  if(articleId&&pendingOpen?.articleId===articleId&&backendArticles.has(articleId))void recordSyntheticOpen(pendingOpen.impressionId);
-  pendingOpen=null;
+  if(articleId&&opened&&backendArticles.has(articleId))void recordSyntheticOpen(opened.impressionId);
   requestAnimationFrame(()=>window.scrollTo({top:state.articleId?0:feedScrollY,left:0,behavior:'instant'}));
 });
 function articleFromHash(){try{return location.hash.startsWith('#article/')?decodeURIComponent(location.hash.slice(9)):null;}catch{return null;}}
