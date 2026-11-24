@@ -53,7 +53,15 @@ test('page lifecycle preserves delivery and closes each tracked article once',as
  const card=page.locator('a.card');
  const impressionId=await card.getAttribute('data-impression-id');
  const closeRows=()=>logging.store.actions().filter(row=>row.event_type==='article_close');
+ const openRows=()=>logging.store.actions().filter(row=>row.event_type==='article_open');
  const drain=()=>page.waitForFunction(()=>JSON.parse(sessionStorage.getItem('sai-news.behavior-pending')).entries.length===0);
+ await page.evaluate(()=>document.addEventListener('click',event=>event.preventDefault(),{once:true}));
+ await card.click();
+ assert.equal(new URL(page.url()).hash,'');
+ await drain();
+ assert.equal(openRows().length,1);
+ assert.equal(closeRows().length,0);
+
  await card.click();
  await page.locator('article.article-page .back').first().click();
  await card.waitFor();
@@ -62,9 +70,24 @@ test('page lifecycle preserves delivery and closes each tracked article once',as
 
  await card.click();
  await page.locator('article.article-page').waitFor();
+ await page.evaluate(()=>{
+  window.dispatchEvent(new PageTransitionEvent('pagehide',{persisted:true}));
+  window.dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true}));
+  window.dispatchEvent(new HashChangeEvent('hashchange'));
+ });
+ await drain();
+ assert.equal(closeRows().length,1);
  await page.goBack();
  await card.waitFor();
  await drain();
+ assert.equal(closeRows().length,2);
+
+ await page.goForward();
+ await page.locator('article.article-page').waitFor();
+ await page.goBack();
+ await card.waitFor();
+ await drain();
+ assert.equal(openRows().length,3);
  assert.equal(closeRows().length,2);
 
  await card.click();
@@ -75,7 +98,7 @@ test('page lifecycle preserves delivery and closes each tracked article once',as
  await card.waitFor();
  await drain();
  assert.deepEqual(closeRows().map(row=>row.impression_id),[impressionId,impressionId,impressionId]);
- assert.equal(logging.store.actions().filter(row=>row.event_type==='article_open'&&row.impression_id===impressionId).length,4);
+ assert.deepEqual(openRows().map(row=>row.impression_id),Array(4).fill(impressionId));
 
  const direct=await browser.newPage();
  await direct.goto(`${url}/#article/a`);

@@ -3,7 +3,6 @@ import {likeButton,seedBackendLikes,backendLikeRevision} from './likes.js';
 import {getBackendArticle,getBackendPage,getBackendCategories,getBackendSubcategories,type FeedCursor} from './backend-api.js';
 import {initializeSyntheticEvents,recordSyntheticOpen} from './synthetic-events.js';
 import {initializeBehavior,connectBehavior,recordBehavior} from './behavior-events.js';
-let pendingOpen:{articleId:string;impressionId:string;recorded:boolean}|null=null;
 let openDetailImpressionId:string|null=null;
 const backendArticles=new Map<string, ArticleSummary>();
 const main=document.querySelector('main')!;
@@ -25,24 +24,26 @@ history.scrollRestoration='manual';
 window.addEventListener('scroll',()=>{
   if(!state.articleId&&!location.hash.startsWith('#article/'))feedScrollY=window.scrollY;
 },{passive:true});
-main.addEventListener('click',event=>{
-  pendingOpen=null;
-  if(state.articleId||event.button!==0||!(event.target instanceof Element))return;
+window.addEventListener('click',event=>{
+  if(state.articleId||!event.isTrusted||event.defaultPrevented||event.button!==0||!(event.target instanceof Element))return;
   const link=event.target.closest<HTMLAnchorElement>('a.card[data-article][data-impression-id]');
-  if(!link)return;
+  if(!link||!main.contains(link))return;
   const {article:articleId,impressionId}=link.dataset;
-  const recorded=event.isTrusted&&behavior.recordOpen(impressionId);
-  if(event.defaultPrevented||event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;
+  if(event.ctrlKey||event.metaKey||event.shiftKey||event.altKey){
+    behavior.recordOpen(impressionId);
+    return;
+  }
+  if(!articleId||!impressionId)return;
+  event.preventDefault();
   feedScrollY=window.scrollY;
-  if(event.isTrusted&&articleId&&impressionId)pendingOpen={articleId,impressionId,recorded};
+  history.pushState(null,'',link.hash);
+  showArticleRoute(articleId,impressionId);
 });
 function closeDetail(){
   const impressionId=openDetailImpressionId;
   openDetailImpressionId=null;
   if(impressionId)recordBehavior('article_close',impressionId,'detail');
 }
-// Queue the close before initializeBehavior registers its pagehide beacon flush.
-window.addEventListener('pagehide',closeDetail);
 const state={category:'전체',subcategory:'전체',status:'loading',feed:null as Feed | null,articleId:null as string | null,error:'',request:0};
 const selectedFilters=()=>({category:state.category==='전체'?null:state.category,subcategory:state.subcategory==='전체'?null:state.subcategory});
 const escape=(value: unknown)=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c as '&' | '<' | '>' | '"' | "'"]));
@@ -159,21 +160,19 @@ function renderArticle(){
  const a=detail;
   main.innerHTML=`<article class="article-page" data-impression-id="${escape(backendArticles.get(a.id)?.impressionId??'')}"><a class="back" href="#">← 뉴스 피드로 돌아가기</a><div class="eyebrow"><span>${escape(a.category)}</span><span class="fiction">${a.synthetic?'가상 기사':'뉴스 기사'}</span></div><h1>${escape(a.title)}</h1><p class="article-summary">${escape(a.summary)}</p>${likeButton(a.id)}<div class="byline">${escape(a.publisher)} <span>${date(a.publishedAt)} KST</span></div>${art(a,'article-art')}<p class="illustration-note">기사 내용을 표현한 그래픽 일러스트</p><div class="article-body">${a.body.split('\n\n').map(p=>`<p>${escape(p)}</p>`).join('')}</div><aside class="source-note"><strong>백엔드 뉴스 API에서 받은 기사입니다.</strong><p>기사의 가상 여부는 상단 표기를 확인해 주세요.</p></aside><a class="back bottom-back" href="#">← 뉴스 피드로 돌아가기</a></article>`;
 }
-window.addEventListener('hashchange',()=>{
-  const articleId=articleFromHash();
-  const opened=pendingOpen?.articleId===articleId?pendingOpen:null;
-  pendingOpen=null;
+function showArticleRoute(articleId:string|null,clickedImpressionId?:string){
   if(articleId===state.articleId)return;
   closeDetail();
-  openDetailImpressionId=opened?.recorded?opened.impressionId:null;
+  if(clickedImpressionId&&behavior.recordOpen(clickedImpressionId))openDetailImpressionId=clickedImpressionId;
   state.articleId=articleId;++detailRequest;
   if(articleId)void loadArticle();
   else if(!state.feed)void load();
   else render();
   main.focus({preventScroll:true});
-  if(articleId&&opened&&backendArticles.has(articleId))void recordSyntheticOpen(opened.impressionId);
+  if(articleId&&clickedImpressionId&&backendArticles.has(articleId))void recordSyntheticOpen(clickedImpressionId);
   requestAnimationFrame(()=>window.scrollTo({top:state.articleId?0:feedScrollY,left:0,behavior:'instant'}));
-});
+}
+window.addEventListener('hashchange',()=>showArticleRoute(articleFromHash()));
 function articleFromHash(){try{return location.hash.startsWith('#article/')?decodeURIComponent(location.hash.slice(9)):null;}catch{return null;}}
 state.articleId=articleFromHash();
-void Promise.all([initializeSyntheticEvents(),initializeBehavior()]).then(initialize).catch(error=>{state.status='error';state.error=error instanceof Error?error.message:String(error);render();});
+void Promise.all([initializeSyntheticEvents(),initializeBehavior(closeDetail)]).then(initialize).catch(error=>{state.status='error';state.error=error instanceof Error?error.message:String(error);render();});

@@ -76,7 +76,7 @@ export function recordBehavior(kind:string,impressionId:string|undefined,page='l
  pending.set(event.event_id,entry);persist();report();void attempt(entry);
  return true;
 }
-export async function initializeBehavior(){
+export async function initializeBehavior(onPageExit:()=>void){
  readerId=null;collectionEnabled=false;pending.clear();
  try{
  const response=await fetch('/api/behavior/status',{credentials:'same-origin',signal:AbortSignal.timeout(1500)});
@@ -94,7 +94,10 @@ export async function initializeBehavior(){
  window.addEventListener('online',retryBehaviorEvents);
  window.addEventListener('focus',retryBehaviorEvents);
  window.addEventListener('pageshow',retryBehaviorEvents);
- window.addEventListener('pagehide',()=>{for(const entry of pending.values())navigator.sendBeacon('/api/behavior/events',new Blob([JSON.stringify({events:[entry.event]})],{type:'application/json'}));});
+ window.addEventListener('pagehide',event=>{
+  if(!event.persisted)onPageExit();
+  for(const entry of pending.values())navigator.sendBeacon('/api/behavior/events',new Blob([JSON.stringify({events:[entry.event]})],{type:'application/json'}));
+ });
  }catch{
   readerId=null;setBehaviorCollection(false);
  }
