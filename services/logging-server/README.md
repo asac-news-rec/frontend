@@ -1,5 +1,11 @@
 # 행동 로깅 서버: FastAPI + PostgreSQL + GCS
 
+선택 가능한 DB 없는 수집 경로 `LOGGING_STORE=pubsub`는
+[Pub/Sub → GCS 전환 계약](../../docs/logging-server/pubsub-gcs.md)을 따릅니다.
+브로커 접수 후 ACK하며 GCS Cloud Storage 구독이 원본을 저장합니다. 아래 PostgreSQL 경로는
+기본값과 롤백 경로로 유지됩니다. Pub/Sub 모드의 독자별 철회·삭제는 미지원이므로 현재는
+합성 데이터용 별도 환경에서 검증하며 운영 전환 완료로 간주하지 않습니다.
+
 Cloud Run 최초 생성, 배포 workflow와 Airflow 검증 순서는
 [Cloud Run 배포 절차](../../docs/logging-server/cloud-run-deployment.md)를 따릅니다.
 

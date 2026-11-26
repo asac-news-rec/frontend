@@ -9,7 +9,7 @@ import {mkdtemp,writeFile,readFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {createDevServer} from '../../.local/server/dev-http.js';
 
-test('k6 maintains reader cookies, replays lost ACK unchanged, and stops on collection outage',{skip:!process.env.K6_BIN,timeout:90000},async t=>{
+for(const mode of ['database','pubsub'])test(`k6 maintains cookies, replays lost ACK, and stops on outage (${mode})`,{skip:!process.env.K6_BIN,timeout:90000},async t=>{
  const root=resolve('.');
  const dir=await mkdtemp(resolve('data/k6-integration-'));
  const patterns=resolve(dir,'patterns.json'),mapping=resolve(dir,'mapping.json');
@@ -27,16 +27,17 @@ test('k6 maintains reader cookies, replays lost ACK unchanged, and stops on coll
   if(req.url==='/internal/served'){
    if(unavailable)return reply(res,503,{});
    for(const row of body.records)offered.set(row.impression_id,row);
-   return reply(res,200,{results:body.records.map(r=>({impression_id:r.impression_id,status:'accepted'}))});
+   return reply(res,200,{...(mode==='pubsub'?{ack_stage:'pubsub'}:{}),results:body.records.map(r=>({impression_id:r.impression_id,status:'accepted',...(mode==='pubsub'?{served_receipt:sign(r.impression_id)}:{})}))});
   }
   assert.equal(req.url,'/events');assert.equal(req.headers['x-news-source'],'browser');
   const results=body.events.map(e=>{
    assert.equal(offered.get(e.impression_id)?.reader_id,req.headers['x-news-reader']);
+   if(mode==='pubsub')assert.equal(e.served_receipt,sign(e.impression_id));
    const old=actions.get(e.event_id);if(old){assert.deepEqual(old,e);duplicate++;}else actions.set(e.event_id,e);
-   return {event_id:e.event_id,status:old?'duplicate':'accepted'};
+   return {event_id:e.event_id,status:old&&mode==='database'?'duplicate':'accepted'};
   });
   if(lose){lose=false;return reply(res,503,{});} // Stored, but ACK is lost to the client.
-  reply(res,200,{results});
+  reply(res,200,{results,...(mode==='pubsub'?{ack_stage:'pubsub'}:{})});
  }));
  const backend=await listen(createServer(async(req,res)=>{
   let id=decode(req);
@@ -63,7 +64,7 @@ test('k6 maintains reader cookies, replays lost ACK unchanged, and stops on coll
  const good=await run('success',2);assert.equal(good.code,0,good.output);
  assert.equal(issued,2);assert.equal(offered.size,4);assert.equal(actions.size,4);assert.equal(duplicate,1);
  assert.equal(new Set(feedReaders).size,2);assert.equal(good.summary.metrics.completed_visits.values.count,4);
- assert.equal(good.summary.metrics.events_duplicate.values.count,1);
+ assert.equal(good.summary.metrics.events_duplicate?.values.count??0,mode==='database'?1:0);
  const load=await run('arrival-rate',1,'load');assert.equal(load.code,0,load.output);
  const arrivals=load.summary.metrics.completed_visits.values.count;
  assert(arrivals>=4&&arrivals<=5); // A visit on the duration boundary is scheduler-dependent.

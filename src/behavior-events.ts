@@ -1,5 +1,12 @@
 import {getBackendReaderId} from './reader-identity.js';
-export interface BehaviorEvent {event_id:string;event_type:string;event_time:string;impression_id:string;page_type:string;duration_ms?:number;ended_at?:string}
+export interface BehaviorEvent {event_id:string;event_type:string;event_time:string;impression_id:string;page_type:string;duration_ms?:number;ended_at?:string;served_receipt?:string}
+const receipts=new Map<string,string>();
+export function rememberServedReceipt(impression:string,receipt:unknown){
+ if(typeof receipt!=='string'||!receipt||receipt.length>4096)return;
+ receipts.set(impression,receipt);
+ // Bound browser memory. Each queued event retains its own receipt for retries.
+ if(receipts.size>10000)receipts.delete(receipts.keys().next().value!);
+}
 let readerId:string|null=null;
 let collectionEnabled=false;
 export const behaviorReader=()=>readerId;
@@ -69,7 +76,8 @@ async function attempt(entry:{event:BehaviorEvent;created:number;attempts:number
 }
 export function recordBehavior(kind:string,impressionId:string|undefined,page='list',extra:Partial<BehaviorEvent>={}){
  if(!collectionEnabled||!readerId||!impressionId)return false;
- const event:BehaviorEvent={event_id:crypto.randomUUID(),event_type:kind,event_time:new Date().toISOString(),impression_id:impressionId,page_type:page,...extra};
+ const receipt=receipts.get(impressionId);
+ const event:BehaviorEvent={event_id:crypto.randomUUID(),event_type:kind,event_time:new Date().toISOString(),impression_id:impressionId,page_type:page,...extra,...(receipt?{served_receipt:receipt}:{})};
  if(pending.size>=500)drop(pending.keys().next().value!,'QUEUE_LIMIT');
  while(pending.size&&new TextEncoder().encode(JSON.stringify([...pending.values()].map(e=>e.event))).length>520192)drop(pending.keys().next().value!,'QUEUE_LIMIT');
  const entry={event:JSON.parse(JSON.stringify(event)) as BehaviorEvent,created:Date.now(),attempts:0,inflight:false};
@@ -77,7 +85,7 @@ export function recordBehavior(kind:string,impressionId:string|undefined,page='l
  return true;
 }
 export async function initializeBehavior(onPageExit:()=>void){
- readerId=null;collectionEnabled=false;pending.clear();
+ readerId=null;collectionEnabled=false;pending.clear();receipts.clear();
  try{
  const response=await fetch('/api/behavior/status',{credentials:'same-origin',signal:AbortSignal.timeout(1500)});
  if(!response.ok||(await response.json()).enabled!==true){setBehaviorCollection(false);return;}

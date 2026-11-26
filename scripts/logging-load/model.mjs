@@ -34,6 +34,8 @@ export function validFeed(feed,reader) {
  return Boolean(feed&&feed.collection_enabled===true&&(feed.reader_id===undefined||feed.reader_id===reader)
   &&typeof feed.request_id==='string'&&feed.request_id&&Number.isFinite(Date.parse(feed.served_at))
   &&Array.isArray(feed.items)&&feed.items.length>0
+  &&(feed.collection_ack_stage===undefined||['database','pubsub'].includes(feed.collection_ack_stage))
+  &&(feed.collection_ack_stage!=='pubsub'||feed.items.every(i=>typeof i.served_receipt==='string'&&i.served_receipt.length>0&&i.served_receipt.length<=4096))
   &&feed.items.every(i=>typeof i.article_id==='string'&&i.article_id&&typeof i.impression_id==='string'&&i.impression_id&&Number.isSafeInteger(i.position)&&i.position>0)
   &&new Set(feed.items.map(i=>i.impression_id)).size===feed.items.length);
 }

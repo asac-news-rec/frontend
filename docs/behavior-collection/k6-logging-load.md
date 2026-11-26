@@ -158,3 +158,10 @@ node --test tests/integration/k6-flow.test.mjs
 근거: [쿠키](https://grafana.com/docs/k6/latest/using-k6/cookies/),
 [VU별 반복](https://grafana.com/docs/k6/latest/using-k6/scenarios/executors/per-vu-iterations/),
 [실행 정보](https://grafana.com/docs/k6/latest/javascript-api/k6-execution/).
+
+## Pub/Sub 모드 추가 계약
+
+피드의 `collection_ack_stage=pubsub`이면 k6는 각 기사의 `served_receipt`를 클릭 요청에
+전달합니다. 서명 영수증은 audit에 기록하지 않으며 ACK의 `ack_stage`만 남깁니다.
+이때 accepted는 DB/GCS 저장 완료가 아닌 Pub/Sub 접수 완료입니다. GCS 파일 도착과
+중복·누락 확인은 [별도 대조 절차](../logging-server/pubsub-gcs.md)를 따릅니다.

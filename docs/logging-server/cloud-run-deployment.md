@@ -1,5 +1,9 @@
 # 로깅 FastAPI Cloud Run 배포
 
+이 문서의 기본값은 PostgreSQL입니다. DB 없이 Pub/Sub에서 GCS로 내보내는 선택 경로의
+환경 변수, IAM, 전환 조건과 롤백은 [Pub/Sub → GCS 전환](pubsub-gcs.md)을 참고합니다.
+현재 workflow는 이미지만 갱신하며 Pub/Sub 리소스나 저장 모드를 자동 변경하지 않습니다.
+
 `FastAPI logging` workflow는 테스트 통과 후 SHA 태그의 이미지를 빌드·푸시하고 기존
 Cloud Run `logging-server`의 이미지를 갱신합니다. 기본 비활성 상태이며 실제 배포는
 아래 인프라 준비와 리뷰·머지 뒤 진행합니다. 이벤트·DB 계약은 변경하지 않습니다.
