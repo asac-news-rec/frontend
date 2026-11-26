@@ -55,14 +55,15 @@ export function setup(){
 function sendEvent(event,context){
  const payload=JSON.stringify({events:[event]}); // Freeze ID, time and body across attempts.
  let recovered=false;
- auditRow({...context,kind:'event_intent',event});
+ const {served_receipt:receipt,...auditableEvent}=event;
+ auditRow({...context,kind:'event_intent',event:auditableEvent}); // Never persist signed receipts.
  for(let attempt=0;attempt<3;attempt++){
   const r=http.post(base+'/api/behavior/events',payload,params('behavior/events'));
   const result=body(r),state=ackState(r.status,result,event.event_id);
   if(state==='accepted'||state==='duplicate'){
    (state==='accepted'?accepted:duplicates).add(1);
    check(true,{event_ack_verified:v=>v});
-   auditRow({...context,kind:'event_ack',event_id:event.event_id,status:state});return;
+   auditRow({...context,kind:'event_ack',event_id:event.event_id,status:state,ack_stage:result.ack_stage??'database'});return;
   }
   if(r.status===403&&result?.error==='SESSION_REQUIRED'&&!recovered){session();recovered=true;}
   else if(state==='fatal')break;
@@ -93,12 +94,12 @@ export default function(data){
  const feed=body(feedResponse);
  ensure(feedResponse.status===200&&validFeed(feed,readerId),'feed_and_served_ack_verified');
  offered.add(feed.items.length);
- auditRow({...context,kind:'feed',request_id:feed.request_id,served_at:feed.served_at,items:feed.items.map(i=>({article_id:i.article_id,impression_id:i.impression_id,position:i.position}))});
+ auditRow({...context,kind:'feed',ack_stage:feed.collection_ack_stage??'database',request_id:feed.request_id,served_at:feed.served_at,items:feed.items.map(i=>({article_id:i.article_id,impression_id:i.impression_id,position:i.position}))});
  let clicks;
  try{clicks=selectClicks(pattern,feed.items,input.articles,selection);}catch{ensure(false,'article_mapping_valid');return;}
  for(const item of clicks){
   sleep(pause/1000);
-  sendEvent({event_id:uuid(),event_type:'article_open',event_time:new Date().toISOString(),impression_id:item.impression_id,page_type:'list'},
+  sendEvent({event_id:uuid(),event_type:'article_open',event_time:new Date().toISOString(),impression_id:item.impression_id,page_type:'list',...(item.served_receipt?{served_receipt:item.served_receipt}:{})},
    {...context,article_id:item.article_id});
  }
  completed.add(1);flowFailed.add(false);

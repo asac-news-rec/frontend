@@ -1,4 +1,4 @@
-import {setBehaviorCollection} from './behavior-events.js';
+import {setBehaviorCollection,rememberServedReceipt} from './behavior-events.js';
 import {getBackendReaderId} from './reader-identity.js';
 export {getBackendReaderId} from './reader-identity.js';
 import type {ArticleSummary} from './types.js';
@@ -51,13 +51,17 @@ function isFeedCursor(value: FeedCursor | null): boolean {
 
 export async function getBackendPage(cursor: FeedCursor | null=null,{fetchImpl=fetch,getReaderId=getBackendReaderId,filters={}}: {fetchImpl?: typeof fetch; getReaderId?: typeof getBackendReaderId; filters?: BackendFilters}={}){
  const readerId=await getReaderId();
- const response: {collection_enabled?:boolean; reader_id?: string; request_id: string; served_at: string; items: (BackendArticle & {impression_id:string;position:number})[]; next_cursor: FeedCursor | null}=await request('/news/feed',{...(cursor===null?{}:{cursor}),...(filters.category?{category:filters.category}:{}),...(filters.subcategory?{subcategory:filters.subcategory}:{})},'POST',fetchImpl);
+ const response: {collection_enabled?:boolean; collection_ack_stage?:string; reader_id?: string; request_id: string; served_at: string; items: (BackendArticle & {impression_id:string;position:number;served_receipt?:string})[]; next_cursor: FeedCursor | null}=await request('/news/feed',{...(cursor===null?{}:{cursor}),...(filters.category?{category:filters.category}:{}),...(filters.subcategory?{subcategory:filters.subcategory}:{})},'POST',fetchImpl);
  if(!response||(response.reader_id!==undefined&&response.reader_id!==readerId)||typeof response.request_id!=='string'||!Number.isFinite(Date.parse(response.served_at))||
   !Array.isArray(response.items)||!isFeedCursor(response.next_cursor))throw new Error('INVALID_BACKEND_FEED');
  const items=response.items.map(item=>{
   const article=readArticle(item);
   if(typeof item.impression_id!=='string'||!Number.isSafeInteger(item.position)||item.position<1)throw new Error('INVALID_BACKEND_ARTICLE');
   article.impressionId=item.impression_id;
+  if(response.collection_enabled===true&&response.collection_ack_stage==='pubsub'){
+   if(typeof item.served_receipt!=='string'||!item.served_receipt||item.served_receipt.length>4096)throw new Error('INVALID_SERVED_RECEIPT');
+   rememberServedReceipt(item.impression_id,item.served_receipt);
+  }
   return {article,rank:item.position,reason:'',impressionId:item.impression_id,isLiked:item.is_liked};
  });
  if(typeof response.collection_enabled==='boolean')setBehaviorCollection(response.collection_enabled);

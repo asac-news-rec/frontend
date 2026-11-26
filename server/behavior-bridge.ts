@@ -40,7 +40,8 @@ export function createBehaviorBridge(origin:string,backendUrl:string|undefined,c
    type ModelMetadata={model_version?:unknown;features_as_of?:unknown};
    const feed=payload as ModelMetadata & {
     request_id:string;served_at:string;reader_id?:string;
-    items:(ModelMetadata & {article_id:string;impression_id:string;position:number;score?:unknown})[];
+    collection_ack_stage?:string;
+    items:(ModelMetadata & {article_id:string;impression_id:string;position:number;score?:unknown;served_receipt?:string})[];
    };
    if(feed.reader_id!==undefined&&feed.reader_id!==session.readerId)throw new CollectionError('FEED_READER_MISMATCH');
    const records=feed.items.map(item=>({
@@ -50,13 +51,22 @@ export function createBehaviorBridge(origin:string,backendUrl:string|undefined,c
     model_version:item.model_version===undefined?feed.model_version:item.model_version,
     features_as_of:item.features_as_of===undefined?feed.features_as_of:item.features_as_of
    }));
-   // These are offered records, not proof of visibility. Earlier committed chunks
-   // remain valid raw data on partial failure; only a complete ACK enables actions.
+   // These are offered records, not proof of visibility. Pub/Sub ACK means broker
+   // receipt, not GCS completion. Only a complete ACK enables actions.
+   for(const item of feed.items)delete item.served_receipt;
+   delete feed.collection_ack_stage;
+   let ackStage:string|undefined;
    const deadline=AbortSignal.timeout(1500);
    for(let start=0;start<records.length;start+=100){
     const part=records.slice(start,start+100),ack=await send!('/internal/served',{records:part},undefined,deadline);
     if(!Array.isArray(ack.results)||ack.results.length!==part.length||ack.results.some((r:{status:string;impression_id:string},i:number)=>!['accepted','duplicate'].includes(r.status)||r.impression_id!==part[i].impression_id))throw new CollectionError('SERVED_NOT_COMMITTED');
+    const stage=ack.ack_stage===undefined?'database':ack.ack_stage;
+    if(!['database','pubsub'].includes(stage)||(ackStage&&ackStage!==stage))throw new CollectionError('SERVED_NOT_COMMITTED');
+    if(stage==='pubsub'&&ack.results.some((r:{served_receipt?:unknown})=>typeof r.served_receipt!=='string'||!r.served_receipt||r.served_receipt.length>4096))throw new CollectionError('SERVED_NOT_COMMITTED');
+    ackStage=stage;
+    if(stage==='pubsub')ack.results.forEach((r:{served_receipt:string},i:number)=>{feed.items[start+i].served_receipt=r.served_receipt;});
    }
+   feed.collection_ack_stage=ackStage??'database';
    return true;
   },
   async handle(req:IncomingMessage,res:ServerResponse,pathname:string){

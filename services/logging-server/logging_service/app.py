@@ -36,23 +36,31 @@ class Settings:
     gcs_bucket: str = ""
     gcs_project: str | None = None
     gcs_prefix: str = ""
+    pubsub_topic: str = ""
+    receipt_key: str = ""
 
     def __post_init__(self):
         if len(self.token) < 24:
             raise ValueError("LOGGING_TOKEN_MIN_24_CHARS")
         if self.flush_ms < 100 or self.max_records < 1:
             raise ValueError("INVALID_LOGGING_LIMITS")
+        if self.pubsub_topic and (self.database_url or len(self.receipt_key) < 32):
+            raise ValueError("PUBSUB_REQUIRES_RECEIPT_KEY_AND_NO_DATABASE")
 
     @classmethod
     def environment(cls):
         mode = os.environ.get("LOGGING_STORE", "postgres")
         url = os.environ.get("LOGGING_DATABASE_URL")
-        if mode not in ("postgres", "sqlite") or (mode == "postgres" and not url):
+        if mode not in ("postgres", "sqlite", "pubsub") or (mode == "postgres" and not url):
             raise ValueError("LOGGING_DATABASE_URL_REQUIRED")
+        topic = os.environ.get("LOGGING_PUBSUB_TOPIC", "") if mode == "pubsub" else ""
+        if mode == "pubsub" and not topic:
+            raise ValueError("LOGGING_PUBSUB_TOPIC_REQUIRED")
         return cls(os.environ.get("LOGGING_TOKEN", ""), os.environ.get("LOGGING_DB", cls.database),
                    os.environ.get("LOGGING_EXPORT_DIR", cls.export_dir), int(os.environ.get("LOGGING_FLUSH_MS", "30000")),
                    int(os.environ.get("LOGGING_MAX_RECORDS", "100000")), url if mode == "postgres" else None,
-                   os.environ.get("GCS_BUCKET", ""), os.environ.get("GOOGLE_CLOUD_PROJECT"), os.environ.get("GCS_PREFIX", ""))
+                   os.environ.get("GCS_BUCKET", ""), os.environ.get("GOOGLE_CLOUD_PROJECT"), os.environ.get("GCS_PREFIX", ""),
+                   topic, os.environ.get("LOGGING_RECEIPT_KEY", ""))
 
 
 class Events(BaseModel):
@@ -147,17 +155,21 @@ class BodyLimit:
         await self.app(scope, replay, send)
 
 
-def create_app(settings=None):
+def create_app(settings=None, *, publisher_client=None):
     @asynccontextmanager
     async def lifespan(app):
         config = settings or Settings.environment()
-        lease = ServiceLock(":memory:" if config.database_url else config.database)
+        lease = ServiceLock(":memory:" if config.database_url or config.pubsub_topic else config.database)
         store = None
         stop = asyncio.Event()
         wake = asyncio.Event()
         worker = None
         try:
-            if config.database_url:
+            if config.pubsub_topic:
+                from .pubsub import PubSubIntake
+                store = PubSubIntake(config.pubsub_topic, config.receipt_key, client=publisher_client)
+                exporter = None
+            elif config.database_url:
                 from .postgres import PostgresStore
                 store = PostgresStore(config.database_url, initialize=True)
                 exporter = None
@@ -180,7 +192,7 @@ def create_app(settings=None):
                         except Exception:
                             logger.error("Periodic export failed")
 
-            if not config.database_url:
+            if exporter:
                 worker = asyncio.create_task(periodic())
             yield
         finally:
@@ -245,7 +257,7 @@ def create_app(settings=None):
     json_protected = [Depends(authenticate), Depends(json_type)]
 
     def notify_export(request):
-        if request.app.state.config.database_url:
+        if request.app.state.exporter is None:
             return
         try:
             with request.app.state.store.lock:
@@ -257,6 +269,8 @@ def create_app(settings=None):
 
     @app.get("/ready", dependencies=protected)
     def ready(request: Request):
+        if request.app.state.config.pubsub_topic:
+            return request.app.state.store.readiness()
         with request.app.state.store.lock:
             exporter = request.app.state.exporter
             return {**request.app.state.store.readiness(), "exporter": exporter.state if exporter else {"mode": "airflow"}}
@@ -300,12 +314,18 @@ def create_app(settings=None):
 
     @app.post("/internal/flush", dependencies=json_protected)
     def flush(request: Request, body: dict = Body(...)):
+        if request.app.state.config.pubsub_topic:
+            return JSONResponse({"scheduled": False, "mode": "pubsub", "gcs_verified": False}, status_code=202)
         if request.app.state.config.database_url:
             return JSONResponse({"scheduled": False, "mode": "airflow"}, status_code=202)
         return {"completed": request.app.state.exporter.flush(True)}
 
     @app.post("/internal/delete-user", dependencies=json_protected)
     def delete_user(request: Request, body: DeleteReader):
+        if request.app.state.config.pubsub_topic:
+            # Mixed-reader export objects need a separate erasure workflow. Never
+            # report success or silently invoke the legacy DB/GCS exporter here.
+            raise HTTPException(501, "PUBSUB_DELETION_REQUIRES_ERASURE_WORKFLOW")
         exporter = request.app.state.exporter
         if exporter is None:
             from .gcs import GCSSink

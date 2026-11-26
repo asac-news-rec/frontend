@@ -6,10 +6,10 @@ import {randomUUID} from 'node:crypto';
 import {Readable} from 'node:stream';
 import {createDevServer} from '../.local/server/dev-http.js';
 
-test('same-origin bridge binds signed reader and replaces forged source headers',async t=>{
+for(const mode of ['database','pubsub'])test(`same-origin bridge binds signed reader and replaces forged source headers (${mode})`,async t=>{
  const token=randomUUID(),reader='019a0000-0000-7000-8000-000000000001',seen=[];
  const listen=async server=>{server.listen(0,'127.0.0.1');await once(server,'listening');t.after(()=>new Promise(resolve=>server.close(resolve)));return `http://127.0.0.1:${server.address().port}`;};
- const logging=await listen(createServer(async(req,res)=>{const chunks=[];for await(const b of req)chunks.push(b);const body=JSON.parse(Buffer.concat(chunks).toString());seen.push({headers:req.headers,body});res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({results:(body.records??body.events).map(r=>({...(r.event_id?{event_id:r.event_id}:{impression_id:r.impression_id}),status:'accepted'}))}));}));
+ const logging=await listen(createServer(async(req,res)=>{const chunks=[];for await(const b of req)chunks.push(b);const body=JSON.parse(Buffer.concat(chunks).toString());seen.push({headers:req.headers,body});res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({...(mode==='pubsub'?{ack_stage:'pubsub'}:{}),results:(body.records??body.events).map(r=>({...(r.event_id?{event_id:r.event_id}:{impression_id:r.impression_id,...(mode==='pubsub'?{served_receipt:'signed-fixture-'+r.impression_id}:{})}),status:'accepted'}))}));}));
  const asOf='2026-01-01T00:00:00.123456Z';
  const backend=await listen(createServer((req,res)=>{
   if(req.url==='/api/v1/user/anonymous')res.setHeader('Set-Cookie','news_reader=backend-proof; Path=/; HttpOnly');
@@ -28,14 +28,19 @@ test('same-origin bridge binds signed reader and replaces forged source headers'
  const missing=await post('/api/behavior/session',{reader_id:reader});assert.equal(missing.status,403);
  const mismatch=await post('/api/behavior/session',{reader_id:'019a0000-0000-7000-8000-000000000002'},proof);assert.equal(mismatch.status,403);
  const session=await post('/api/behavior/session',{reader_id:reader},proof);assert.equal(session.status,200);const cookie=proof+'; '+session.headers.get('set-cookie').split(';')[0];assert.match(session.headers.get('set-cookie'),/HttpOnly/);assert.equal((await session.json()).reader_id,reader);
- assert.equal((await post('/api/v1/news/feed',{},cookie)).status,200);
+ const feedResponse=await post('/api/v1/news/feed',{},cookie);
+ assert.equal(feedResponse.status,200);
+ const feed=await feedResponse.json();
+ assert.equal(feed.collection_ack_stage,mode);
+ assert.equal(feed.items[0].served_receipt,mode==='pubsub'?'signed-fixture-imp':undefined);
  assert.equal(seen[0].body.records[0].reader_id,reader);
  const metadata=seen[0].body.records.map(({score,model_version,features_as_of})=>({score,model_version,features_as_of}));
  assert.deepEqual(metadata,[{score:0.42,model_version:'ctr-v3',features_as_of:asOf},
   {score:null,model_version:null,features_as_of:null}]);
- const action={event_id:randomUUID(),event_type:'article_open',event_time:new Date().toISOString(),impression_id:'imp',page_type:'list'};
+ const action={event_id:randomUUID(),event_type:'article_open',event_time:new Date().toISOString(),impression_id:'imp',page_type:'list',...(feed.items[0].served_receipt?{served_receipt:feed.items[0].served_receipt}:{})};
  assert.equal((await post('/api/behavior/events',{events:[action]},cookie,{'x-news-reader':'attacker','x-news-source':'simulator'})).status,200);
  assert.equal(seen[1].headers['x-news-reader'],reader);assert.equal(seen[1].headers['x-news-source'],'browser');assert.equal(seen[1].headers.authorization,`Bearer ${token}`);
+ assert.deepEqual(seen[1].body.events[0],action);
  assert.equal((await post('/api/behavior/events',{events:[action]},cookie+'tampered')).status,403);
  assert.equal((await post('/api/behavior/events',{events:[action]},cookie,{Origin:'https://other.invalid'})).status,403);
  const unbound=await post('/api/v1/news/feed',{},cookie.replace('news_reader=backend-proof','news_reader=another-proof'));

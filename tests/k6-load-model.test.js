@@ -24,6 +24,8 @@ test('feed success requires enabled collection and valid unique impressions',()=
  assert(validFeed(f,'reader'));assert(!validFeed({...f,collection_enabled:false},'reader'));
  assert(!validFeed({...f,reader_id:'other'},'reader'));
  assert(!validFeed({...f,items:[...f.items,...f.items]},'reader'));
+ assert(!validFeed({...f,collection_ack_stage:'pubsub'},'reader'));
+ assert(validFeed({...f,collection_ack_stage:'pubsub',items:f.items.map(i=>({...i,served_receipt:'signed-fixture'}))},'reader'));
 });
 test('input ownership, target origin and bounds are validated',()=>{
  const p={metadata:{run_id:'r'},sessions:[{session_key:'s',reader_key:'reader',offered_article_keys:['a'],clicks:[]}]};
