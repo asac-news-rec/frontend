@@ -1,5 +1,9 @@
 # 행동 로깅 서버: FastAPI + PostgreSQL + GCS
 
+기존 ACK·원본 형식을 유지하는 선택형 연결 풀/독자별 잠금은
+[PostgreSQL 수집 동시성 개선](../../docs/logging-server/postgres-concurrency.md)을 참고합니다.
+`LOGGING_POSTGRES_POOL_ENABLED=true`로 선택하며 기본값은 기존 경로입니다.
+
 Cloud Run 최초 생성, 배포 workflow와 Airflow 검증 순서는
 [Cloud Run 배포 절차](../../docs/logging-server/cloud-run-deployment.md)를 따릅니다.
 

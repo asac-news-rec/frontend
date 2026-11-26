@@ -65,8 +65,10 @@ def records(now=None):
     return row, event
 
 
-def test_postgres_commit_ack_and_worker_receipt(database, sink):
-    config = Settings(TOKEN, database_url=database, gcs_bucket=sink.bucket.name, gcs_project="local-integration", gcs_prefix=sink.prefix)
+@pytest.mark.parametrize("pooled", [False, True])
+def test_postgres_commit_ack_and_worker_receipt(database, sink, pooled):
+    config = Settings(TOKEN, database_url=database, gcs_bucket=sink.bucket.name, gcs_project="local-integration", gcs_prefix=sink.prefix,
+                      postgres_pool_enabled=pooled)
     row, event = records()
     backend_time = datetime.now(timezone.utc).replace(microsecond=654367)
     row["served_at"] = backend_time.isoformat()
@@ -321,8 +323,9 @@ def test_manifest_ack_loss_and_db_reconnection(database, sink, monkeypatch):
     store.close()
 
 
-def test_postgres_file_batch_atomicity(database, sink):
-    config = Settings(TOKEN, database_url=database)
+@pytest.mark.parametrize("pooled", [False, True])
+def test_postgres_file_batch_atomicity(database, sink, pooled):
+    config = Settings(TOKEN, database_url=database, postgres_pool_enabled=pooled)
     row, _ = records()
     with TestClient(create_app(config)) as client:
         client.headers["Authorization"] = f"Bearer {TOKEN}"

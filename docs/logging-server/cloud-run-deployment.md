@@ -1,5 +1,9 @@
 # 로깅 FastAPI Cloud Run 배포
 
+연결 풀과 독자별 잠금의 선택 설정·연결 예산·롤백은
+[PostgreSQL 수집 동시성 개선](postgres-concurrency.md)을 따릅니다.
+workflow는 이미지만 갱신하므로 pool 활성화 환경 변수는 별도로 검토·적용합니다.
+
 `FastAPI logging` workflow는 테스트 통과 후 SHA 태그의 이미지를 빌드·푸시하고 기존
 Cloud Run `logging-server`의 이미지를 갱신합니다. 기본 비활성 상태이며 실제 배포는
 아래 인프라 준비와 리뷰·머지 뒤 진행합니다. 이벤트·DB 계약은 변경하지 않습니다.

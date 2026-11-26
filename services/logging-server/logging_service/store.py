@@ -109,8 +109,7 @@ class Store:
                     if atomic:
                         raise
                     results.append(self.rejected(value, "impression_id", str(error)))
-            if inserts:
-                self.db.executemany("INSERT INTO served_records VALUES(?,?,?,?,?,?,?,?,?)", inserts)
+            self.insert_records("INSERT INTO served_records VALUES(?,?,?,?,?,?,?,?,?)", inserts, max_records)
             return {"results": results}
 
     @staticmethod
@@ -127,6 +126,10 @@ class Store:
         if new and sum(self.counts().values()) + new > maximum:
             raise OverflowError("INBOX_CAPACITY")
         return existing
+
+    def insert_records(self, query, rows, maximum):
+        if rows:
+            self.db.executemany(query, rows)
 
     def intake_actions(self, body, reader, enabled, source="browser", max_records=100000):
         identifier(reader)
@@ -166,8 +169,7 @@ class Store:
                     results.append({"event_id": record["event_id"], "status": "duplicate" if old else "accepted"})
                 except InputError as error:
                     results.append(self.rejected(value, "event_id", str(error)))
-            if inserts:
-                self.db.executemany("INSERT INTO action_records VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", inserts)
+            self.insert_records("INSERT INTO action_records VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", inserts, max_records)
             return {"results": results}
 
     def counts(self):

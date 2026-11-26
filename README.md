@@ -1,5 +1,8 @@
 # 마이뉴스 프론트엔드
 
+기존 로그 형식을 유지하는 PostgreSQL 연결 풀·독자별 잠금 선택 모드는
+[수집 동시성 개선](docs/logging-server/postgres-concurrency.md)을 참조하세요.
+
 화면 API로 쿠키 발급·피드 조회·로그 저장과 부하를 검증하는 절차는 [k6 로그 입력·부하 실험](docs/behavior-collection/k6-logging-load.md)을 참조하세요.
 
 합성 로그 실습의 페르소나 5명과 입력 생성 명령은 [합성 로그 에이전트](docs/behavior-collection/synthetic-logging-agent.md)를 참조하세요. 현재 관심사 이름은 프런트엔드 시연 데이터 기준이며 백엔드 DB 카테고리는 확인되지 않았습니다.
