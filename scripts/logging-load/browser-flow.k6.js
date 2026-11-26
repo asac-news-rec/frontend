@@ -5,7 +5,7 @@ import crypto from 'k6/crypto';
 import {Counter,Rate} from 'k6/metrics';
 import {dataset,integer,origin,validFeed,selectClicks,ackState} from './model.mjs';
 
-const base=origin(__ENV.BASE_URL);
+const base=origin(__ENV.BASE_URL,__ENV.ALLOW_REMOTE_LOAD);
 if(!__ENV.PATTERNS||!__ENV.MAPPING)throw new Error('PATTERNS_AND_MAPPING_REQUIRED');
 const input=dataset(JSON.parse(open(__ENV.PATTERNS)),JSON.parse(open(__ENV.MAPPING)));
 const mode=__ENV.MODE||'smoke',selection=__ENV.SELECTION||'rank';
@@ -23,7 +23,7 @@ export const options={
  scenarios:{readers:mode==='smoke'
   ?{executor:'per-vu-iterations',vus,iterations:visits,maxDuration:'10m',gracefulStop:'20s'}
   :{executor:'constant-arrival-rate',rate,timeUnit:'1s',duration:`${duration}s`,preAllocatedVUs:vus,maxVUs:maxVus,gracefulStop:'30s'}},
- thresholds:{checks:['rate==1'],flow_failed:[{threshold:'rate<0.01',abortOnFail:true,delayAbortEval:'5s'}],
+ thresholds:{checks:['rate==1'],flow_failed:['rate==0'],
   http_req_duration:['p(95)<5000'],completed_visits:['count>0'],
   ...(mode==='load'?{dropped_iterations:['count==0']}:{completed_visits:[`count==${vus*visits}`]})}
 };
@@ -78,6 +78,7 @@ function sendEvent(event,context){
 }
 export default function(data){
  const group=input.groups[(execution.vu.idInTest-1)%input.groups.length];
+ // VU-local in both executors; scenario.iterationInTest would be global.
  const visit=execution.vu.iterationInScenario;
  const pattern=group.sessions[visit%group.sessions.length];
  // Repeat anonymous issuance with the existing jar to verify reader continuity.

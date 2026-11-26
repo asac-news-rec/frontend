@@ -4,10 +4,12 @@ export function integer(value, fallback, min, max) {
  if(!Number.isSafeInteger(n)||n<min||n>max)throw new Error('INVALID_INTEGER_OPTION');
  return n;
 }
-export function origin(value) {
+export function origin(value, allowRemote) {
  if(typeof value!=='string'||!/^https?:\/\/[^/?#@\s]+\/?$/.test(value))throw new Error('BASE_URL_MUST_BE_ORIGIN');
  const base=value.replace(/\/$/,'');
  if(base.startsWith('http:')&&!/^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(base))throw new Error('REMOTE_HTTPS_REQUIRED');
+ const local=/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(base);
+ if(!local&&allowRemote!=='1')throw new Error('REMOTE_LOAD_REQUIRES_ALLOW_REMOTE_LOAD_1');
  return base;
 }
 export function dataset(patterns,mapping) {

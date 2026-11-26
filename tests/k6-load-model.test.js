@@ -36,3 +36,16 @@ test('input ownership, target origin and bounds are validated',()=>{
  assert.throws(()=>origin('http://example.com'),/HTTPS/);
  assert.throws(()=>integer('NaN',1,1,10));
 });
+
+test('remote targets require explicit opt-in even for smoke runs',()=>{
+ for(const host of ['localhost','127.0.0.1','[::1]']){
+  assert.equal(origin('http://'+host+':4173'),'http://'+host+':4173');
+  assert.equal(origin('https://'+host),'https://'+host);
+ }
+ for(const host of ['example.com','localhost.example.com','127.0.0.1.example.com']){
+  for(const flag of [undefined,'0','true',1])assert.throws(()=>origin('https://'+host,flag),/ALLOW_REMOTE_LOAD/);
+  assert.equal(origin('https://'+host+'/', '1'),'https://'+host);
+ }
+ assert.throws(()=>origin('http://example.com','1'),/HTTPS/);
+ assert.throws(()=>origin('https://user:secret@example.com','1'),/ORIGIN/);
+});
