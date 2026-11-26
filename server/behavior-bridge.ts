@@ -1,3 +1,4 @@
+import {CollectionError} from './collection-error.js';
 import {createHmac,timingSafeEqual} from 'node:crypto';
 import type {IncomingMessage,ServerResponse} from 'node:http';
 import {newsReaderCookie} from './backend-proxy.js';
@@ -35,13 +36,13 @@ export function createBehaviorBridge(origin:string,backendUrl:string|undefined,c
   async onFeed(req:IncomingMessage,payload:unknown){
    if(!config)return;
    const session=current(req,proofName);
-   if(!session||current(req)?.readerId!==session.readerId)throw new Error('READER_PROOF_INVALID');
+   if(!session||current(req)?.readerId!==session.readerId)throw new CollectionError('READER_PROOF_INVALID');
    type ModelMetadata={model_version?:unknown;features_as_of?:unknown};
    const feed=payload as ModelMetadata & {
     request_id:string;served_at:string;reader_id?:string;
     items:(ModelMetadata & {article_id:string;impression_id:string;position:number;score?:unknown})[];
    };
-   if(feed.reader_id!==undefined&&feed.reader_id!==session.readerId)throw new Error('FEED_READER_MISMATCH');
+   if(feed.reader_id!==undefined&&feed.reader_id!==session.readerId)throw new CollectionError('FEED_READER_MISMATCH');
    const records=feed.items.map(item=>({
     request_id:feed.request_id,served_at:feed.served_at,reader_id:session.readerId,
     article_id:item.article_id,impression_id:item.impression_id,position:item.position,
@@ -54,7 +55,7 @@ export function createBehaviorBridge(origin:string,backendUrl:string|undefined,c
    const deadline=AbortSignal.timeout(1500);
    for(let start=0;start<records.length;start+=100){
     const part=records.slice(start,start+100),ack=await send!('/internal/served',{records:part},undefined,deadline);
-    if(!Array.isArray(ack.results)||ack.results.length!==part.length||ack.results.some((r:{status:string;impression_id:string},i:number)=>!['accepted','duplicate'].includes(r.status)||r.impression_id!==part[i].impression_id))throw new Error('SERVED_NOT_COMMITTED');
+    if(!Array.isArray(ack.results)||ack.results.length!==part.length||ack.results.some((r:{status:string;impression_id:string},i:number)=>!['accepted','duplicate'].includes(r.status)||r.impression_id!==part[i].impression_id))throw new CollectionError('SERVED_NOT_COMMITTED');
    }
    return true;
   },

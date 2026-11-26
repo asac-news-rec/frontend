@@ -1,3 +1,4 @@
+import {CollectionError} from '../.local/server/collection-error.js';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createLoggingSender} from '../.local/server/logging-client.js';
@@ -30,8 +31,8 @@ test('메타데이터 실패·잘못된 토큰·IAM 거절 후 다음 요청에�
   }
   return Promise.resolve(mode==='forbidden'?new Response('{}',{status:403}):Response.json({results:[]}));
  }});
- for(mode of ['sync-fail','wrong-audience','expired'])await assert.rejects(send('/events',{}),/^Error: LOGGING_IDENTITY_UNAVAILABLE$/);
- mode='forbidden';await assert.rejects(send('/events',{}),/LOGGING_UNAVAILABLE/);assert.equal(identities,4);
+ for(mode of ['sync-fail','wrong-audience','expired'])await assert.rejects(send('/events',{}),error=>error instanceof CollectionError&&error.code==='LOGGING_IDENTITY_UNAVAILABLE');
+ mode='forbidden';await assert.rejects(send('/events',{}),error=>error instanceof CollectionError&&error.code==='LOGGING_UNAVAILABLE');assert.equal(identities,4);
  mode='healthy';await send('/events',{});assert.equal(identities,5);
  await assert.rejects(send('https://other.invalid/events',{}),/INVALID_LOGGING_ROUTE/);
 });

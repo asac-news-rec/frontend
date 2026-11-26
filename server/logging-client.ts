@@ -1,3 +1,4 @@
+import {CollectionError} from './collection-error.js';
 export interface LoggingConfig {url:string;token:string;audience?:string}
 
 // Server-only client. Cloud Run IAM and application Bearer authentication use
@@ -28,7 +29,7 @@ export function createLoggingSender(config:LoggingConfig,{fetchImpl=fetch,now=Da
     const claims=JSON.parse(Buffer.from(token.split('.')[1],'base64url').toString());
     if(claims.aud!==audience||!Number.isFinite(claims.exp)||claims.exp*1000<=now()+5000)throw new Error();
     cached={token,expires:claims.exp*1000};return token;
-   }catch{throw new Error('LOGGING_IDENTITY_UNAVAILABLE');}
+   }catch{throw new CollectionError('LOGGING_IDENTITY_UNAVAILABLE');}
   }).finally(()=>{pending=undefined;});
   return pending;
  };
@@ -41,7 +42,7 @@ export function createLoggingSender(config:LoggingConfig,{fetchImpl=fetch,now=Da
    headers:{'Content-Type':'application/json',Authorization:`Bearer ${config.token}`,
     ...(idToken?{'X-Serverless-Authorization':`Bearer ${idToken}`} : {}),
     ...(readerId?{'x-news-reader':readerId,'x-collection-enabled':'true','x-news-source':'browser'}:{})},body:JSON.stringify(body)});
-  if(!response.ok){if(response.status===401||response.status===403)cached=undefined;throw new Error('LOGGING_UNAVAILABLE');}
+  if(!response.ok){if(response.status===401||response.status===403)cached=undefined;throw new CollectionError('LOGGING_UNAVAILABLE');}
   return response.json();
  };
 }

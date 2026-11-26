@@ -1,3 +1,4 @@
+import {collectionFailureReason} from './collection-error.js';
 import type {IncomingMessage,ServerResponse} from 'node:http';
 
 export interface FeedRejection {status:number;error:string}
@@ -53,12 +54,12 @@ export function createBackendProxy({baseUrl,apiPrefix='api',origin,fetchImpl=fet
    if(upstream.ok&&method==='POST'&&route==='/news/feed'&&onFeed){
     let enabled:boolean|void|FeedRejection;
     const started=performance.now();
-    try{enabled=await onFeed(req,payload);}catch(error){
+    let reason:string|undefined;
+    try{enabled=await onFeed(req,payload);if(enabled===false)reason='SERVED_ACK_FAILED';}catch(error){
      enabled=false;
-     const name=error instanceof Error?error.name:'';
-     const message=error instanceof Error?error.message:'';
-     const reason=name==='TimeoutError'||name==='AbortError'?'SERVED_ACK_TIMEOUT':
-      ['SERVED_NOT_COMMITTED','READER_PROOF_INVALID','FEED_READER_MISMATCH','LOGGING_IDENTITY_UNAVAILABLE','LOGGING_UNAVAILABLE'].includes(message)?message:'SERVED_ACK_FAILED';
+     reason=collectionFailureReason(error);
+    }
+    if(reason){
      // Never log payloads, cookies, raw exceptions or reader identifiers.
      console.warn(JSON.stringify({severity:'WARNING',event:'feed_collection_disabled',reason,elapsed_ms:Math.round(performance.now()-started)}));
     }

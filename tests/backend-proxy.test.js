@@ -1,3 +1,4 @@
+import {CollectionError,collectionErrorCodes} from '../.local/server/collection-error.js';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
@@ -100,12 +101,23 @@ test('수집 타임아웃 진단은 사유와 시간만 기록하고 HTTP 200 �
  const origin='http://localhost', payload={items:[],request_id:'private-request'};
  let failure=new DOMException('private-token','TimeoutError');
  const proxy=createBackendProxy({baseUrl:'http://fixture.invalid',origin,
-  fetchImpl:async()=>Response.json(payload),onFeed:async()=>{throw failure;}});
+  fetchImpl:async()=>Response.json(payload),onFeed:async()=>{if(failure===false)return false;if(failure===undefined)return;throw failure;}});
  const server=createServer((req,res)=>proxy(req,res,'/api/news/feed'));
  server.listen(0,'127.0.0.1');await once(server,'listening');t.after(()=>new Promise(r=>server.close(r)));
  const request=()=>fetch(`http://127.0.0.1:${server.address().port}/api/news/feed`,{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:'{}'});
  const response=await request();assert.equal(response.status,200);assert.equal((await response.json()).collection_enabled,false);
  assert.equal(warnings[0].reason,'SERVED_ACK_TIMEOUT');assert.equal(typeof warnings[0].elapsed_ms,'number');
  failure=new Error('private-cookie');await request();assert.equal(warnings[1].reason,'SERVED_ACK_FAILED');
+ for(const code of collectionErrorCodes){
+  failure=new CollectionError(code);failure.message='private changed message';
+  const response=await request();assert.equal(response.status,200);
+  assert.equal((await response.json()).collection_enabled,false);
+  assert.equal(warnings.at(-1).reason,code);
+ }
+ failure=new DOMException('private','AbortError');await request();assert.equal(warnings.at(-1).reason,'SERVED_ACK_TIMEOUT');
+ failure=false;const disabled=await request();assert.equal((await disabled.json()).collection_enabled,false);
+ assert.equal(warnings.at(-1).reason,'SERVED_ACK_FAILED');
+ const count=warnings.length;failure=undefined;await request();assert.equal(warnings.length,count);
+ for(const warning of warnings)assert.deepEqual(Object.keys(warning).sort(),['elapsed_ms','event','reason','severity']);
  assert(!JSON.stringify(warnings).includes('private'));
 });

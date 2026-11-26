@@ -50,3 +50,24 @@ def test_served_select_count_does_not_grow_per_article():
         store.intake_served({'records': [dict(request_id='r', impression_id=f'i-{i}', reader_id='u',
             article_id='a', position=i+1, served_at=stamp) for i in range(100)]})
         assert len([s for s in statements if s.startswith('SELECT')]) == 4
+
+
+def test_rejected_middle_row_preserves_valid_rows_and_atomic_keeps_prior_data():
+    with closing(Store(':memory:')) as store:
+        stamp = iso(int(time.time() * 1000))
+        first = dict(request_id='r', impression_id='first', reader_id='reader',
+                     article_id='a', position=1, served_at=stamp)
+        last = {**first, 'impression_id': 'last', 'position': 2}
+        conflict = {**first, 'article_id': 'different'}
+        result = store.intake_served({'records': [first, conflict, last]})['results']
+        assert [row['status'] for row in result] == ['accepted', 'rejected', 'accepted']
+        assert result[1]['code'] == 'IMPRESSION_ID_CONFLICT'
+        assert store.counts()['served'] == 2
+        pending = {**first, 'impression_id': 'pending'}
+        with pytest.raises(InputError):
+            store.intake_served({'records': [pending, pending, conflict]}, atomic=True)
+        assert store.get('served_records', 'impression_id', 'pending') is None
+        assert store.counts()['served'] == 2
+        assert store.intake_served({'records': [first, last]})['results'] == [
+            {'impression_id': 'first', 'status': 'duplicate'},
+            {'impression_id': 'last', 'status': 'duplicate'}]
