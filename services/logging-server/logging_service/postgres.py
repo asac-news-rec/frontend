@@ -5,6 +5,7 @@ while PostgreSQL transaction locks serialize duplicate/capacity/deletion decisio
 across API processes. No time-partitioned database tables are created.
 """
 import threading
+import logging
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -18,6 +19,7 @@ from .store import Store
 
 INTAKE_LOCK = 2700101
 EXPORT_LOCK = 2700102
+logger = logging.getLogger(__name__)
 
 
 class Row(dict):
@@ -102,6 +104,7 @@ class PostgresStore(Store):
 
     @contextmanager
     def transaction(self):
+        started = time.perf_counter()
         with self.lock:
             if self.connection.closed or self.connection.broken:
                 if self._export_connection is not None:
@@ -111,7 +114,15 @@ class PostgresStore(Store):
                 self.db = Database(self.connection)
             with self.connection.transaction():
                 self.connection.execute("SELECT pg_advisory_xact_lock(%s)", (INTAKE_LOCK,))
-                yield
+                acquired = time.perf_counter()
+                try:
+                    yield
+                finally:
+                    elapsed = time.perf_counter() - started
+                    if elapsed >= 0.5:
+                        logger.warning("logging_transaction_slow wait_ms=%d work_ms=%d",
+                                       (acquired - started) * 1000,
+                                       (time.perf_counter() - acquired) * 1000)
 
     def prune_exported_records(self):
         cutoff = iso(self.now() - 24 * 60 * 60 * 1000)

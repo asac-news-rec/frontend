@@ -72,30 +72,45 @@ class Store:
         row = self.db.execute(f"SELECT * FROM {table} WHERE {key}=?", (value,)).fetchone()
         return dict(row) if row else None
 
+    def get_many(self, table, key, values):
+        # Only internal table/key constants reach this helper. Values stay bound.
+        values = list(set(values))
+        if not values:
+            return {}
+        placeholders = ",".join("?" for _ in values)
+        return {row[key]: dict(row) for row in self.db.execute(
+            f"SELECT * FROM {table} WHERE {key} IN ({placeholders})", values).fetchall()}
+
     def intake_served(self, body, atomic=False, max_records=100000):
         rows = envelope(body, "records")
         with self.transaction():
-            self.capacity(rows, "served_records", "impression_id", max_records)
+            existing = self.capacity(rows, "served_records", "impression_id", max_records)
+            revoked = self.get_many("revoked_users", "reader_id", (
+                r["reader_id"] for r in rows if isinstance(r, dict) and isinstance(r.get("reader_id"), str)))
+            inserts = []
             results = []
             at = self.now()
             for value in rows:
                 try:
                     record = served(value, at)
-                    if self.get("revoked_users", "reader_id", record["reader_id"]):
+                    if record["reader_id"] in revoked:
                         raise InputError("USER_REVOKED")
                     raw, hashed = canonical(record)
-                    old = self.get("served_records", "impression_id", record["impression_id"])
+                    old = existing.get(record["impression_id"])
                     if old and old["canonical_hash"] != hashed:
                         raise InputError("IMPRESSION_ID_CONFLICT")
                     if not old:
-                        self.db.execute("INSERT INTO served_records VALUES(?,?,?,?,?,?,?,?,?)", (
+                        inserts.append((
                             record["impression_id"], record["request_id"], record["reader_id"], record["article_id"],
                             record["position"], record["served_at"], iso(at), raw, hashed))
+                        existing[record["impression_id"]] = {"canonical_hash": hashed}
                     results.append({"impression_id": record["impression_id"], "status": "duplicate" if old else "accepted"})
                 except InputError as error:
                     if atomic:
                         raise
                     results.append(self.rejected(value, "impression_id", str(error)))
+            if inserts:
+                self.db.executemany("INSERT INTO served_records VALUES(?,?,?,?,?,?,?,?,?)", inserts)
             return {"results": results}
 
     @staticmethod
@@ -107,9 +122,11 @@ class Store:
         candidates = {r.get(key) for r in rows if isinstance(r, dict) and isinstance(r.get(key), str)}
         if key == "event_id":
             candidates = {identity.lower() for identity in candidates}
-        new = sum(not self.get(table, key, identity) for identity in candidates)
+        existing = self.get_many(table, key, candidates)
+        new = len(candidates - existing.keys())
         if new and sum(self.counts().values()) + new > maximum:
             raise OverflowError("INBOX_CAPACITY")
+        return existing
 
     def intake_actions(self, body, reader, enabled, source="browser", max_records=100000):
         identifier(reader)
@@ -121,29 +138,36 @@ class Store:
         with self.transaction():
             if self.get("revoked_users", "reader_id", reader):
                 raise InputError("USER_REVOKED")
-            self.capacity(rows, "action_records", "event_id", max_records)
+            existing = self.capacity(rows, "action_records", "event_id", max_records)
+            owners = self.get_many("served_records", "impression_id", (
+                r["impression_id"] for r in rows if isinstance(r, dict) and isinstance(r.get("impression_id"), str)))
+            inserts = []
             results = []
             at = self.now()
             for value in rows:
                 try:
                     record = action(value, at)
-                    owner = self.get("served_records", "impression_id", record["impression_id"])
+                    owner = owners.get(record["impression_id"])
                     if not owner:
                         results.append(self.rejected(record, "event_id", "IMPRESSION_NOT_READY", "retryable"))
                         continue
                     if owner["reader_id"] != reader:
                         raise InputError("IMPRESSION_FORBIDDEN")
                     raw, hashed = canonical(record)
-                    old = self.get("action_records", "event_id", record["event_id"])
+                    old = existing.get(record["event_id"])
                     if old and (old["canonical_hash"] != hashed or old["source"] != source or old["measurement_version"] != "stationary-visible-v1"):
                         raise InputError("EVENT_ID_CONFLICT")
                     if not old:
-                        self.db.execute("INSERT INTO action_records VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", (
+                        inserts.append((
                             record["event_id"], record["impression_id"], record["event_type"], record["page_type"], record["event_time"],
                             record.get("ended_at"), record.get("duration_ms"), iso(at), raw, hashed, source, 1, "stationary-visible-v1"))
+                        existing[record["event_id"]] = {"canonical_hash": hashed, "source": source,
+                                                       "measurement_version": "stationary-visible-v1"}
                     results.append({"event_id": record["event_id"], "status": "duplicate" if old else "accepted"})
                 except InputError as error:
                     results.append(self.rejected(value, "event_id", str(error)))
+            if inserts:
+                self.db.executemany("INSERT INTO action_records VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", inserts)
             return {"results": results}
 
     def counts(self):

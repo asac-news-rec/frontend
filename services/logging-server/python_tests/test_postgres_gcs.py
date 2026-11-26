@@ -377,3 +377,9 @@ def test_lost_worker_lease_delete_then_late_gcs_write_is_swept(database, sink):
         recovered.intake_actions({"events": [records()[1]]}, "reader", True)
     recovered.close()
     deleter.close()
+
+
+def test_postgres_batch_contract(database):
+    from test_batch_intake import exercise_batch
+    with closing(PostgresStore(database)) as store:
+        exercise_batch(store)

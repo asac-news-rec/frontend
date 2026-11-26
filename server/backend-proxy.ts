@@ -1,3 +1,4 @@
+import {collectionFailureReason} from './collection-error.js';
 import type {IncomingMessage,ServerResponse} from 'node:http';
 
 export interface FeedRejection {status:number;error:string}
@@ -52,7 +53,16 @@ export function createBackendProxy({baseUrl,apiPrefix='api',origin,fetchImpl=fet
    }
    if(upstream.ok&&method==='POST'&&route==='/news/feed'&&onFeed){
     let enabled:boolean|void|FeedRejection;
-    try{enabled=await onFeed(req,payload);}catch{enabled=false;}
+    const started=performance.now();
+    let reason:string|undefined;
+    try{enabled=await onFeed(req,payload);if(enabled===false)reason='SERVED_ACK_FAILED';}catch(error){
+     enabled=false;
+     reason=collectionFailureReason(error);
+    }
+    if(reason){
+     // Never log payloads, cookies, raw exceptions or reader identifiers.
+     console.warn(JSON.stringify({severity:'WARNING',event:'feed_collection_disabled',reason,elapsed_ms:Math.round(performance.now()-started)}));
+    }
     if(enabled&&typeof enabled==='object')return reply(enabled.status,{error:enabled.error});
     if(typeof enabled==='boolean'&&payload&&typeof payload==='object'&&!Array.isArray(payload))payload={...payload,collection_enabled:enabled};
    }
