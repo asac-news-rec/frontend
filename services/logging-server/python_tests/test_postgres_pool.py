@@ -145,17 +145,91 @@ def test_pool_exhaustion_and_lock_timeout_return_503_then_recover(database):
                       postgres_pool_enabled=True, postgres_pool_size=1, postgres_pool_timeout=.05)
     with TestClient(create_app(config), raise_server_exceptions=False) as client:
         client.headers["Authorization"] = "Bearer " + config.token
+        body = {"records": [record()]}
         with client.app.state.store.pool.connection():
-            assert client.post("/internal/served", json={"records": [record()]}).status_code == 503
+            assert client.post("/internal/served", json=body).status_code == 503
         with psycopg.connect(database, autocommit=True) as blocking:
             with blocking.transaction():
                 blocking.execute("SELECT pg_advisory_xact_lock(%s)", (INTAKE_LOCK,))
-                assert client.post("/internal/served", json={"records": [record()]}).status_code == 503
-        assert client.post("/internal/served", json={"records": [record()]}).json()["results"][0]["status"] == "accepted"
+                assert client.post("/internal/served", json=body).status_code == 503
+        assert client.app.state.store.readiness()["served"] == 0
+        assert client.post("/internal/served", json=body).json()["results"][0]["status"] == "accepted"
+        assert client.post("/internal/served", json=body).json()["results"][0]["status"] == "duplicate"
         # A broken idle connection must never produce a successful ACK.
         with client.app.state.store.pool.connection() as connection:
             connection.close()
         assert client.post("/events", json={"events": [event()]}, headers={"x-news-reader": "reader", "x-collection-enabled": "true"}).json()["results"][0]["status"] == "accepted"
+
+
+def test_full_pool_queue_returns_503_and_same_payload_retry_is_idempotent(database):
+    config = Settings("pool-test-token-not-a-real-secret", database_url=database,
+                      postgres_pool_enabled=True, postgres_pool_size=1, postgres_pool_timeout=5)
+    with TestClient(create_app(config), raise_server_exceptions=False) as client:
+        client.headers["Authorization"] = "Bearer " + config.token
+        pool = client.app.state.store.pool
+        body = {"records": [record()]}
+        def borrow():
+            with pool.connection():
+                pass
+        with ThreadPoolExecutor(max_workers=64) as workers:
+            with pool.connection():
+                pending = [workers.submit(borrow) for _ in range(64)]
+                deadline = time.monotonic() + 3
+                while pool.get_stats()["requests_waiting"] < 64 and time.monotonic() < deadline:
+                    time.sleep(.01)
+                assert pool.get_stats()["requests_waiting"] == 64
+                response = client.post("/internal/served", json=body)
+                assert response.status_code == 503
+                assert response.json() == {"error": "STORAGE_UNAVAILABLE"}
+            for future in pending:
+                future.result(timeout=3)
+        assert client.app.state.store.readiness()["served"] == 0
+        assert client.post("/internal/served", json=body).json()["results"][0]["status"] == "accepted"
+        assert client.post("/internal/served", json=body).json()["results"][0]["status"] == "duplicate"
+
+
+def test_full_capacity_duplicate_invalid_and_atomic_rollback(database):
+    with closing(PooledPostgresStore(database)) as store:
+        row = record()
+        store.intake_served({"records": [row]}, max_records=1)
+        assert store.intake_served({"records": [row]}, atomic=True, max_records=1)["results"][0]["status"] == "duplicate"
+        invalid = record("other", "bad", score=True)
+        assert store.intake_served({"records": [invalid]}, max_records=1)["results"][0]["status"] == "rejected"
+        with pytest.raises(InputError):
+            store.intake_served({"records": [invalid]}, atomic=True, max_records=1)
+        with pytest.raises(OverflowError):
+            store.intake_served({"records": [record("other", "new")]}, atomic=True, max_records=1)
+        assert store.readiness()["served"] == 1
+
+
+def test_concurrent_delete_is_bounded_and_slot_recovers_after_failure(database, tmp_path, monkeypatch):
+    reached, release = threading.Event(), threading.Event()
+    monkeypatch.setattr("logging_service.gcs.GCSSink", lambda *args: LocalSink(tmp_path))
+    original = Exporter.delete
+    def failing_delete(self, reader):
+        reached.set()
+        assert release.wait(5)
+        raise RuntimeError("synthetic deletion failure")
+    config = Settings("pool-test-token-not-a-real-secret", database_url=database, postgres_pool_enabled=True)
+    with TestClient(create_app(config), raise_server_exceptions=False) as client, ThreadPoolExecutor(max_workers=1) as workers:
+        client.headers["Authorization"] = "Bearer " + config.token
+        monkeypatch.setattr(Exporter, "delete", failing_delete)
+        first = workers.submit(client.post, "/internal/delete-user", json={"reader_id": "reader"})
+        try:
+            assert reached.wait(3)
+            # If another connection is attempted, this test fails instead of 503 DELETE_BUSY.
+            with monkeypatch.context() as patch:
+                def unexpected_connection(*args, **kwargs):
+                    raise AssertionError("extra deletion connection")
+                patch.setattr("logging_service.postgres.PostgresStore", unexpected_connection)
+                busy = client.post("/internal/delete-user", json={"reader_id": "other"})
+                assert busy.status_code == 503 and busy.json() == {"error": "DELETE_BUSY"}
+                assert busy.headers["Retry-After"] == "1"
+        finally:
+            release.set()
+        assert first.result(timeout=3).status_code == 503
+        monkeypatch.setattr(Exporter, "delete", original)
+        assert client.post("/internal/delete-user", json={"reader_id": "reader"}).json() == {"deleted": True}
 
 
 def test_existing_export_format_and_new_arrivals_during_gcs_io(database, tmp_path):

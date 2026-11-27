@@ -3,6 +3,7 @@ import hmac
 import json
 import logging
 import os
+import threading
 from contextlib import asynccontextmanager, closing
 from dataclasses import dataclass
 from pathlib import Path
@@ -180,6 +181,7 @@ def create_app(settings=None):
                 store = Store(config.database)
                 exporter = Exporter(store, LocalSink(config.export_dir))
             app.state.config, app.state.store, app.state.exporter = config, store, exporter
+            app.state.deletion_slot = threading.BoundedSemaphore(1)
             app.state.loop, app.state.wake = asyncio.get_running_loop(), wake
 
             async def periodic():
@@ -329,8 +331,16 @@ def create_app(settings=None):
                 # Keep the export session lock on one dedicated connection across
                 # GCS calls; never return a session-locked connection to the pool.
                 from .postgres import PostgresStore
-                with closing(PostgresStore(config.database_url)) as deletion_store:
-                    Exporter(deletion_store, GCSSink(config.gcs_bucket, config.gcs_project, config.gcs_prefix)).delete(body.reader_id)
+                # Bound extra connections before opening one, including startup
+                # schema checks. Busy callers retry; do not queue more connections.
+                slot = request.app.state.deletion_slot
+                if not slot.acquire(blocking=False):
+                    raise HTTPException(503, "DELETE_BUSY", headers={"Retry-After": "1"})
+                try:
+                    with closing(PostgresStore(config.database_url)) as deletion_store:
+                        Exporter(deletion_store, GCSSink(config.gcs_bucket, config.gcs_project, config.gcs_prefix)).delete(body.reader_id)
+                finally:
+                    slot.release()
                 return {"deleted": True}
             exporter = Exporter(request.app.state.store, GCSSink(config.gcs_bucket, config.gcs_project, config.gcs_prefix))
         exporter.delete(body.reader_id)
