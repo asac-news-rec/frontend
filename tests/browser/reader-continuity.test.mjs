@@ -8,6 +8,8 @@ import {chromium} from 'playwright';
 import {createDevServer} from '../../.local/server/dev-http.js';
 
 test('logging activation and cookie lifecycle preserve the canonical reader and existing likes',async t=>{
+ // Close clients before the FIFO server/process teardown hooks.
+ let browser;t.after(async()=>{await browser?.close();});
  const token=randomUUID(),legacy='019a0000-0000-7000-8000-000000000001',other='019a0000-0000-7000-8000-000000000002';
  const listen=async server=>{server.listen(0,'127.0.0.1');await once(server,'listening');t.after(()=>new Promise(resolve=>server.close(resolve)));return `http://127.0.0.1:${server.address().port}`;};
  let issued=0,eventCount=0;const feeds=[],likeOwners=[],liked=new Set([legacy]);
@@ -24,7 +26,7 @@ test('logging activation and cookie lifecycle preserve the canonical reader and 
  }));
  const reserve=createServer();reserve.listen(0,'127.0.0.1');await once(reserve,'listening');const port=reserve.address().port;await new Promise(r=>reserve.close(r));const url=`http://127.0.0.1:${port}`;
  const web=createDevServer({root:fileURLToPath(new URL('../../',import.meta.url)),origin:url,backendBaseUrl:backend,logging:{url:logging,token}});web.listen(port,'127.0.0.1');await once(web,'listening');t.after(()=>new Promise(r=>web.close(r)));
- const browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:{})});t.after(()=>browser.close());
+ browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:{})});
  const cookie=(readerId,expires)=>{const body=Buffer.from(JSON.stringify({readerId,expires})).toString('base64url');return body+'.'+createHmac('sha256',token).update('news_behavior\0'+body).digest('base64url');};
  const idOnPage=async page=>(await page.context().cookies()).find(c=>c.name==='news_reader')?.value;
  const ready=async page=>{await page.locator('a.card').waitFor();await page.waitForFunction(()=>!document.querySelector('.like-button')?.disabled);};

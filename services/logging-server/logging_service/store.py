@@ -185,19 +185,28 @@ class Store:
             for row in rows:
                 if not self.get("revoked_users", "reader_id", row["reader_id"]):
                     groups.setdefault((row["stream"], row["reader_id"], interval_path or partition(row["time"])), []).append(row)
-            for (stream, reader, part), records in groups.items():
-                for offset in range(0, len(records), 1000):
-                    chunk, job = records[offset:offset + 1000], str(uuid.uuid4())
-                    exported = []
-                    for row in chunk:
-                        item = {**json.loads(row["canonical_json"]), "received_at": row["received_at"]}
-                        if stream == "actions":
-                            item.update({key: row[key] for key in ("source", "schema_version", "measurement_version")})
-                        exported.append(compact(item))
-                    content = "\n".join(exported) + "\n"
-                    self.db.execute("INSERT INTO export_jobs(job_id,reader_id,stream,partition_path,object_name,content,content_hash,row_count,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
-                                    (job, reader, stream, part, f"{stream}/{part}/part-{job}.jsonl" + (".gz" if interval_path else ""), content, digest(content), len(chunk), iso(self.now())))
-                    self.db.executemany("INSERT INTO export_members VALUES(?,?,?)", [(stream, r["record_id"], job) for r in chunk])
+            self._insert_export_groups(groups, interval_path)
+
+    def _insert_export_groups(self, groups, interval_path):
+        """Caller holds the intake transaction; jobs and membership commit together."""
+        jobs, members = [], []
+        for (stream, reader, part), records in groups.items():
+            for offset in range(0, len(records), 1000):
+                chunk, job = records[offset:offset + 1000], str(uuid.uuid4())
+                exported = []
+                for row in chunk:
+                    item = {**json.loads(row["canonical_json"]), "received_at": row["received_at"]}
+                    if stream == "actions":
+                        item.update({key: row[key] for key in ("source", "schema_version", "measurement_version")})
+                    exported.append(compact(item))
+                content = "\n".join(exported) + "\n"
+                jobs.append((job, reader, stream, part, f"{stream}/{part}/part-{job}.jsonl" + (".gz" if interval_path else ""),
+                             content, digest(content), len(chunk), iso(self.now())))
+                members.extend((stream, r["record_id"], job) for r in chunk)
+        if jobs:
+            self.db.executemany("INSERT INTO export_jobs(job_id,reader_id,stream,partition_path,object_name,content,content_hash,row_count,created_at) VALUES(?,?,?,?,?,?,?,?,?)", jobs)
+            self.db.executemany("INSERT INTO export_members VALUES(?,?,?)", members)
+        return len(jobs)
 
     def jobs(self, force=False):
         return [dict(r) for r in self.db.execute("SELECT j.* FROM export_jobs j WHERE status!='uploaded' AND NOT EXISTS(SELECT 1 FROM revoked_users r WHERE r.reader_id=j.reader_id) AND (? OR next_attempt_at<=?) ORDER BY created_at,job_id", (int(force), self.now()))]

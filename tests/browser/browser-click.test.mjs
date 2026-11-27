@@ -10,6 +10,8 @@ import {startFastApiLogging} from '../helpers/fastapi-logging.mjs';
 import {runBrowserClick} from '../../scripts/browser-click-agent.mjs';
 
 test('real browser click reaches SQLite once, isolated readers and invalid choices stay separate',async t=>{
+ // Close clients before the FIFO server/process teardown hooks.
+ let browser;t.after(async()=>{await browser?.close();});
  const token=randomUUID(),agentToken=randomUUID();
  const {url:fastApiUrl,store}=await startFastApiLogging(t,token);
  const listen=async server=>{server.listen(0,'127.0.0.1');await once(server,'listening');t.after(()=>new Promise(resolve=>server.close(resolve)));return `http://127.0.0.1:${server.address().port}`;};
@@ -53,7 +55,7 @@ test('real browser click reaches SQLite once, isolated readers and invalid choic
  const url=`http://127.0.0.1:${port}`;
  const web=createDevServer({root:fileURLToPath(new URL('../../',import.meta.url)),origin:url,backendBaseUrl:backend,synthetic:{agentToken,loggingToken:token,loggingUrl}});
  web.listen(port,'127.0.0.1');await once(web,'listening');t.after(()=>new Promise(resolve=>web.close(resolve)));
- const browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:{})});t.after(()=>browser.close());
+ browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:{})});
  const persona={reader_id:'fixture-persona',persona:'AI에 관심'};
  const run=choose=>runBrowserClick({browser,url,persona,agentToken,choose});
  assert.equal((await fetch(url+'/api/synthetic/session',{method:'POST'})).status,401);

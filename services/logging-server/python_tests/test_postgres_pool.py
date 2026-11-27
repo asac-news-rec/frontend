@@ -1,4 +1,5 @@
 import os
+import json
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -47,6 +48,208 @@ def record(reader="reader", impression="imp", **changes):
 def event(impression="imp"):
     return dict(event_id=str(uuid4()), event_type="article_open", impression_id=impression,
                 event_time=iso(int(time.time() * 1000)), page_type="list")
+
+
+def test_export_pages_preserve_interval_payload_membership_and_retry(database, monkeypatch, caplog):
+    import logging_service.postgres as postgres
+    monkeypatch.setattr(postgres, "EXPORT_PREPARE_BATCH_SIZE", 2)
+    now = int(time.time() * 1000)
+    with closing(PostgresStore(database, now=lambda: now)) as store:
+        rows = [record(f"reader-{i % 2}", f"imp-{i}") for i in range(7)]
+        store.intake_served({"records": rows})
+        for row in rows:
+            store.intake_actions({"events": [event(row["impression_id"])]}, row["reader_id"], True)
+        store.intake_served({"records": [record("revoked", "revoked"), record("outside", "outside")]})
+        store.revoke("revoked")
+        store.db.execute("UPDATE served_records SET received_at=? WHERE impression_id=?", (iso(now + 1000), "outside"))
+        with caplog.at_level("INFO", logger="logging_service.postgres"):
+            store.prepare_exports((iso(now), iso(now + 1000)), "test-interval")
+        jobs = store.db.execute("SELECT * FROM export_jobs").fetchall()
+        identities = {j["job_id"] for j in jobs}
+        assert sum(j["row_count"] for j in jobs) == 14
+        assert all(1 <= j["row_count"] <= 2 and j["object_name"].endswith(".jsonl.gz") for j in jobs)
+        assert store.db.execute("SELECT count(*) FROM export_members").fetchone()[0] == 14
+        for job in jobs:
+            payload = [json.loads(line) for line in job["content"].splitlines()]
+            assert len(payload) == job["row_count"]
+            assert all(p["received_at"] == iso(now) for p in payload)
+            if job["stream"] == "actions":
+                assert all(p["source"] == "browser" and p["measurement_version"] == "stationary-visible-v1" for p in payload)
+            else:
+                assert all(p["reader_id"] == job["reader_id"] for p in payload)
+        store.prepare_exports((iso(now), iso(now + 1000)), "test-interval")
+        assert {j["job_id"] for j in store.jobs(True)} == identities
+        messages = [r.message for r in caplog.records if r.message.startswith("logging_export_prepare_batch")]
+        assert len(messages) == 9  # Five raw served pages (including exclusions), four action pages.
+        assert all("wait_ms=" in m and "work_ms=" in m and "failed=False" in m for m in messages)
+        assert all("reader-" not in m and "imp-" not in m for m in messages)
+
+
+def test_export_page_failure_rolls_back_only_page_and_retry_keeps_committed_jobs(database, monkeypatch):
+    import logging_service.postgres as postgres
+    monkeypatch.setattr(postgres, "EXPORT_PREPARE_BATCH_SIZE", 2)
+    with closing(PostgresStore(database)) as store:
+        store.intake_served({"records": [record(impression=f"imp-{i}") for i in range(5)]})
+        insert = store._insert_export_groups
+        calls = 0
+
+        def fail_second_page(*args):
+            nonlocal calls
+            calls += 1
+            result = insert(*args)
+            if calls == 2:
+                raise RuntimeError("simulated interruption before page commit")
+            return result
+
+        monkeypatch.setattr(store, "_insert_export_groups", fail_second_page)
+        with pytest.raises(RuntimeError, match="simulated interruption"):
+            store.prepare_exports()
+        saved = store.jobs(True)
+        assert len(saved) == 1 and saved[0]["row_count"] == 2
+        assert store.db.execute("SELECT count(*) FROM export_members").fetchone()[0] == 2
+        monkeypatch.setattr(store, "_insert_export_groups", insert)
+        store.prepare_exports()
+        assert sum(j["row_count"] for j in store.jobs(True)) == 5
+        assert store.db.execute("SELECT count(*) FROM export_members").fetchone()[0] == 5
+        assert store.get("export_jobs", "job_id", saved[0]["job_id"])["content_hash"] == saved[0]["content_hash"]
+
+
+def test_sparse_export_advances_over_empty_eligible_pages(database, monkeypatch):
+    import logging_service.postgres as postgres
+    monkeypatch.setattr(postgres, "EXPORT_PREPARE_BATCH_SIZE", 2)
+    now = int(time.time() * 1000)
+    with closing(PostgresStore(database, now=lambda: now)) as store:
+        store.intake_served({"records": [record(impression=f"imp-{i}") for i in range(7)]})
+        store.prepare_exports()
+        # Existing memberships must not stop traversal of subsequent raw pages.
+        store.intake_served({"records": [record(impression="imp-7")]})
+        store.db.execute("UPDATE served_records SET received_at=? WHERE impression_id<?", (iso(now - 1000), "imp-4"))
+        store.prepare_exports((iso(now), iso(now + 1)), "sparse")
+        assert store.db.execute("SELECT count(*) FROM export_members").fetchone()[0] == 8
+        assert sum(j["row_count"] for j in store.jobs(True) if j["partition_path"] == "sparse") == 1
+
+
+@pytest.mark.parametrize("late_offset", [0, 1000])
+def test_arrival_behind_cursor_uses_receipt_interval_and_explicit_retry(database, monkeypatch, late_offset):
+    import logging_service.postgres as postgres
+    monkeypatch.setattr(postgres, "EXPORT_PREPARE_BATCH_SIZE", 2)
+    now = int(time.time() * 1000)
+    with closing(PostgresStore(database, now=lambda: now)) as worker, closing(
+            PostgresStore(database, now=lambda: now + late_offset)) as intake:
+        worker.intake_served({"records": [record(impression=f"imp-{i}") for i in range(5)]})
+        batch = worker._prepare_export_batch
+
+        def late_arrival(stream, after, *args):
+            rows = batch(stream, after, *args)
+            if stream == "served" and after == "":
+                intake.intake_served({"records": [record(impression="000-late")]})
+            return rows
+
+        monkeypatch.setattr(worker, "_prepare_export_batch", late_arrival)
+        worker.prepare_exports((iso(now), iso(now + 1000)), "closed")
+        assert worker.db.execute("SELECT count(*) FROM export_members").fetchone()[0] == 5
+        monkeypatch.setattr(worker, "_prepare_export_batch", batch)
+        # Normal new receipt belongs to the next interval. A deliberately
+        # backdated receipt requires rerunning the original interval.
+        interval = (iso(now + late_offset), iso(now + late_offset + 1000))
+        worker.prepare_exports(interval, "closed" if late_offset == 0 else "next")
+        assert worker.db.execute("SELECT count(*) FROM export_members").fetchone()[0] == 6
+
+
+@pytest.mark.parametrize("backend", ["sqlite", "postgres"])
+def test_member_constraint_failure_rolls_back_jobs_and_retry(database, monkeypatch, backend):
+    import sqlite3
+    from logging_service.store import Store
+    with closing(Store(":memory:") if backend == "sqlite" else PostgresStore(database)) as store:
+        store.intake_served({"records": [record()]})
+        original = store.db
+
+        class FailingMembers:
+            def __getattr__(self, name):
+                return getattr(original, name)
+
+            def executemany(self, query, values):
+                if "INSERT INTO export_members" in query:
+                    values = [*values, values[0]]  # Real duplicate-key error after job insertion.
+                return original.executemany(query, values)
+
+        monkeypatch.setattr(store, "db", FailingMembers())
+        with pytest.raises((sqlite3.IntegrityError, psycopg.errors.UniqueViolation)):
+            store.prepare_exports()
+        assert store.db.execute("SELECT count(*) FROM export_jobs").fetchone()[0] == 0
+        assert store.db.execute("SELECT count(*) FROM export_members").fetchone()[0] == 0
+        monkeypatch.setattr(store, "db", original)
+        store.prepare_exports()
+        assert len(store.jobs(True)) == 1
+        assert store.db.execute("SELECT count(*) FROM export_members").fetchone()[0] == 1
+
+
+@pytest.mark.parametrize("backend", ["sqlite", "postgres"])
+def test_independent_export_preparers_do_not_duplicate_members(database, tmp_path, backend):
+    from logging_service.store import Store
+    factory = (lambda: Store(tmp_path / "concurrent.sqlite")) if backend == "sqlite" else lambda: PostgresStore(database)
+    with closing(factory()) as first, closing(factory()) as second, ThreadPoolExecutor(max_workers=2) as workers:
+        first.intake_served({"records": [record(impression=f"imp-{i}") for i in range(5)]})
+        barrier = threading.Barrier(2)
+
+        def prepare(store):
+            barrier.wait(timeout=3)
+            store.prepare_exports()
+
+        pending = [workers.submit(prepare, store) for store in (first, second)]
+        for future in pending:
+            future.result(timeout=5)
+        assert sum(j["row_count"] for j in first.jobs(True)) == 5
+        assert first.db.execute("SELECT count(*) FROM export_members").fetchone()[0] == 5
+
+
+@pytest.mark.parametrize("pooled", [False, True])
+def test_intake_progresses_between_export_pages_with_export_lease_held(database, monkeypatch, tmp_path, pooled):
+    import logging_service.postgres as postgres
+    monkeypatch.setattr(postgres, "EXPORT_PREPARE_BATCH_SIZE", 2)
+    reached, release = threading.Event(), threading.Event()
+    with closing(PostgresStore(database)) as worker, closing(
+            PooledPostgresStore(database) if pooled else PostgresStore(database)) as intake:
+        intake.intake_served({"records": [record(impression=f"imp-{i}") for i in range(5)]})
+        batch = worker._prepare_export_batch
+
+        def pause_after_commit(stream, after, *args):
+            rows = batch(stream, after, *args)
+            if stream == "served" and after == "":
+                reached.set()
+                assert release.wait(5)
+            return rows
+
+        monkeypatch.setattr(worker, "_prepare_export_batch", pause_after_commit)
+        with ThreadPoolExecutor(max_workers=2) as threads:
+            exporting = threads.submit(Exporter(worker, LocalSink(tmp_path)).flush, True)
+            try:
+                assert reached.wait(3)
+                accepted = threads.submit(intake.intake_served, {"records": [record("new-reader", "new-imp")]})
+                assert accepted.result(timeout=2)["results"][0]["status"] == "accepted"
+                assert not exporting.done()
+            finally:
+                release.set()
+            assert exporting.result(timeout=3) > 0
+
+
+def test_export_rechecks_revocation_on_each_page(database, monkeypatch):
+    import logging_service.postgres as postgres
+    monkeypatch.setattr(postgres, "EXPORT_PREPARE_BATCH_SIZE", 2)
+    with closing(PostgresStore(database)) as worker, closing(PostgresStore(database)) as revoker:
+        worker.intake_served({"records": [record(impression=f"imp-{i}") for i in range(5)]})
+        batch = worker._prepare_export_batch
+
+        def revoke_after_first_page(stream, after, *args):
+            rows = batch(stream, after, *args)
+            if stream == "served" and after == "":
+                revoker.revoke("reader")
+            return rows
+
+        monkeypatch.setattr(worker, "_prepare_export_batch", revoke_after_first_page)
+        worker.prepare_exports()
+        assert worker.db.execute("SELECT count(*) FROM export_members").fetchone()[0] == 2
+        assert worker.jobs(True) == []  # Prepared jobs of a revoked reader cannot upload.
 
 
 def test_different_readers_progress_while_one_transaction_is_paused(database, monkeypatch):

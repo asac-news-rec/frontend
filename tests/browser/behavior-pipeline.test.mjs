@@ -10,6 +10,8 @@ import {createDevServer} from '../../.local/server/dev-http.js';
 
 const enabled=Boolean(process.env.TEST_POSTGRES_URL&&process.env.STORAGE_EMULATOR_HOST);
 test('ordinary screen exposure/open/like travels through proxy, PostgreSQL and GCS worker',{skip:!enabled},async t=>{
+ // Close clients before the FIFO server/process teardown hooks.
+ let browser;t.after(async()=>{await browser?.close();});
  const python=process.env.LOGGING_PYTHON||'python',service=fileURLToPath(new URL('../../services/logging-server/',import.meta.url));
  const token=randomUUID(),prefix='browser-'+randomUUID();
  const listen=async server=>{server.listen(0,'127.0.0.1');await once(server,'listening');t.after(()=>new Promise(resolve=>server.close(resolve)));return `http://127.0.0.1:${server.address().port}`;};
@@ -39,7 +41,7 @@ test('ordinary screen exposure/open/like travels through proxy, PostgreSQL and G
  const webPort=await reserve(),url=`http://127.0.0.1:${webPort}`;
  const web=createDevServer({root:fileURLToPath(new URL('../../',import.meta.url)),origin:url,backendBaseUrl:backend,logging:{url:loggingUrl,token}});
  web.listen(webPort,'127.0.0.1');await once(web,'listening');t.after(()=>new Promise(resolve=>web.close(resolve)));
- const browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:{})});t.after(()=>browser.close());
+ browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:{})});
  const page=await browser.newPage();let lost=false;
  await page.route('**/api/behavior/events',async route=>{const body=route.request().postDataJSON();if(!lost&&body.events?.[0]?.event_type==='article_open'){lost=true;await route.fetch();await route.abort();}else await route.continue();});
  await page.goto(url);const card=page.locator('a.card').first();await card.waitFor();await card.scrollIntoViewIfNeeded();await page.waitForTimeout(750);
