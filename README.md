@@ -2,6 +2,8 @@
 
 기존 로그 형식을 유지하는 PostgreSQL 연결 풀·독자별 잠금 선택 모드는
 [수집 동시성 개선](docs/logging-server/postgres-concurrency.md)을 참조하세요.
+PostgreSQL export 준비는 최대 500행씩 커밋해 수집 요청이 배치 사이에 진행할 수 있습니다.
+이 변경은 Cloud Run뿐 아니라 Airflow의 `logging_service` 패키지도 업데이트해야 적용됩니다.
 
 ## CI 실행 범위
 

@@ -15,10 +15,11 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from .schema import iso
-from .store import Store
+from .store import Store, partition
 
 INTAKE_LOCK = 2700101
 EXPORT_LOCK = 2700102
+EXPORT_PREPARE_BATCH_SIZE = 500
 logger = logging.getLogger(__name__)
 
 
@@ -103,7 +104,7 @@ class PostgresStore(Store):
             self.connection.execute((Path(__file__).parent / "postgres.sql").read_text(encoding="utf-8"))
 
     @contextmanager
-    def transaction(self):
+    def transaction(self, *, timings=None):
         started = time.perf_counter()
         with self.lock:
             if self.connection.closed or self.connection.broken:
@@ -113,7 +114,11 @@ class PostgresStore(Store):
                 self.connection.execute("SET search_path TO behavior_logging")
                 self.db = Database(self.connection)
             with self.connection.transaction():
-                self.connection.execute("SELECT pg_advisory_xact_lock(%s)", (INTAKE_LOCK,))
+                try:
+                    self.connection.execute("SELECT pg_advisory_xact_lock(%s)", (INTAKE_LOCK,))
+                finally:
+                    if timings is not None:
+                        timings["wait_ms"] = (time.perf_counter() - started) * 1000
                 acquired = time.perf_counter()
                 try:
                     yield
@@ -123,6 +128,55 @@ class PostgresStore(Store):
                         logger.warning("logging_transaction_slow wait_ms=%d work_ms=%d",
                                        (acquired - started) * 1000,
                                        (time.perf_counter() - acquired) * 1000)
+
+    def prepare_exports(self, interval=None, interval_path=None):
+        # Keep the export session lease (when called by Exporter), but release the
+        # intake gate after each page so queued intake/deletion transactions run.
+        # Keyset pagination avoids rescanning all previously prepared members.
+        for stream in ("served", "actions"):
+            after = ""
+            while True:
+                rows = self._prepare_export_batch(stream, after, interval, interval_path)
+                if not rows:
+                    break
+                after = rows[-1]["record_id"]
+                if len(rows) < EXPORT_PREPARE_BATCH_SIZE:
+                    break
+
+    def _prepare_export_batch(self, stream, after, interval, interval_path):
+        started = time.perf_counter()
+        timings, count, jobs, failed = {"wait_ms": 0}, 0, 0, True
+        # These SQL fragments come only from this internal stream choice.
+        if stream == "served":
+            source, key, stamp = "served_records s", "s.impression_id", "s.served_at"
+            columns, received = "s.*", "s.received_at"
+        else:
+            source = "action_records a JOIN served_records s USING(impression_id)"
+            key, stamp, columns, received = "a.event_id", "a.event_time", "a.*,s.reader_id", "a.received_at"
+        bounds = f" AND {received}>=%s AND {received}<%s" if interval else ""
+        try:
+            with self.transaction(timings=timings):
+                rows = self.connection.execute(f"""
+                    SELECT {columns}, %s AS stream, {key} AS record_id, {stamp} AS time
+                    FROM {source}
+                    WHERE {key}>%s
+                      AND NOT EXISTS (SELECT 1 FROM revoked_users r WHERE r.reader_id=s.reader_id)
+                      AND NOT EXISTS (SELECT 1 FROM export_members m WHERE m.stream=%s AND m.record_id={key})
+                      {bounds}
+                    ORDER BY {key} LIMIT %s
+                    """, (stream, after, stream, *(interval or ()), EXPORT_PREPARE_BATCH_SIZE)).fetchall()
+                count = len(rows)
+                groups = {}
+                for row in rows:
+                    groups.setdefault((stream, row["reader_id"], interval_path or partition(row["time"])), []).append(row)
+                jobs = self._insert_export_groups(groups, interval_path)
+            failed = False
+            return rows
+        finally:
+            total = (time.perf_counter() - started) * 1000
+            log = logger.warning if failed or total >= 500 else logger.info
+            log("logging_export_prepare_batch stream=%s rows=%d jobs=%d total_ms=%d wait_ms=%d work_ms=%d failed=%s",
+                        stream, count, jobs, total, timings["wait_ms"], max(0, total - timings["wait_ms"]), failed)
 
     def prune_exported_records(self):
         cutoff = iso(self.now() - 24 * 60 * 60 * 1000)
