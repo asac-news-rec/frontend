@@ -1,15 +1,6 @@
 name: FastAPI logging
 on:
   pull_request:
-    paths:
-      - 'services/logging-server/**'
-      - 'tests/integration/**'
-      - 'tests/helpers/**'
-      - 'scripts/synthetic-logging-agent.mjs'
-      - 'src/**'
-      - 'server/**'
-      - 'tests/browser/**'
-      - '.github/workflows/logging-fastapi.yml'
   push:
     branches: [main]
   workflow_dispatch:
@@ -17,9 +8,31 @@ permissions:
   contents: read
 concurrency:
   group: logging-fastapi-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
-  test:
+  scope:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      browser: ${{ steps.scope.outputs.browser }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - id: scope
+        run: node scripts/ci-browser-scope.mjs
+        env:
+          CI_EVENT: ${{ github.event_name }}
+          CI_BASE: ${{ github.event.pull_request.base.sha }}
+          CI_HEAD: ${{ github.event.pull_request.head.sha }}
+
+  integration:
+    name: Logging integration
+    timeout-minutes: 8
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -56,12 +69,71 @@ jobs:
       - run: python -m compileall -q logging_service
       - run: python -m pytest python_tests -q
       - run: node --test ../../tests/integration/fastapi-logging.test.mjs
+
+  browser:
+    name: Browser regression
+    needs: scope
+    if: needs.scope.outputs.browser == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: logging
+          POSTGRES_PASSWORD: ci-integration-only
+          POSTGRES_DB: logging
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U logging -d logging"
+          --health-interval 3s --health-timeout 3s --health-retries 20
+      gcs:
+        image: fsouza/fake-gcs-server:1.54
+        env:
+          FAKE_GCS_SCHEME: http
+          FAKE_GCS_EXTERNAL_URL: http://127.0.0.1:4443
+        ports: ['4443:4443']
+    env:
+      TEST_POSTGRES_URL: postgresql://logging:ci-integration-only@127.0.0.1:5432/logging
+      STORAGE_EMULATOR_HOST: http://127.0.0.1:4443
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: python -m pip install -r services/logging-server/requirements-dev.txt
       - run: npm ci
-        working-directory: .
       - run: npx playwright install --with-deps chromium
-        working-directory: .
-      - run: npm run test:browser
-        working-directory: .
+      - run: npm run build:local
+      - run: node --test --test-timeout=120000 tests/browser/*.test.mjs
+
+  test:
+    name: test
+    needs: [scope, integration, browser]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require every applicable check
+        env:
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          INTEGRATION_RESULT: ${{ needs.integration.result }}
+          BROWSER_REQUIRED: ${{ needs.scope.outputs.browser }}
+          BROWSER_RESULT: ${{ needs.browser.result }}
+        run: |
+          test "$SCOPE_RESULT" = success
+          test "$INTEGRATION_RESULT" = success
+          if [ "$BROWSER_REQUIRED" = true ]; then
+            test "$BROWSER_RESULT" = success
+          else
+            test "$BROWSER_RESULT" = skipped
+          fi
 
   deploy:
     name: Deploy logging FastAPI to Cloud Run
