@@ -16,7 +16,9 @@ test('ordinary screen exposure/open/like travels through proxy, PostgreSQL and G
  const reserve=async()=>{const s=createServer();s.listen(0,'127.0.0.1');await once(s,'listening');const p=s.address().port;await new Promise(r=>s.close(r));return p;};
  const intervalStart=new Date().toISOString();
  const port=await reserve(),loggingUrl=`http://127.0.0.1:${port}`;
- const env={...process.env,LOGGING_STORE:'postgres',LOGGING_TOKEN:token,LOGGING_DATABASE_URL:process.env.TEST_POSTGRES_URL,LOGGING_PORT:String(port),GCS_BUCKET:'integration-raw-logs',GOOGLE_CLOUD_PROJECT:'local-integration',GCS_PREFIX:prefix};
+ const env={...process.env,LOGGING_STORE:'postgres',LOGGING_TOKEN:token,LOGGING_DATABASE_URL:process.env.TEST_POSTGRES_URL,LOGGING_PORT:String(port),GCS_BUCKET:prefix,GOOGLE_CLOUD_PROJECT:'local-integration',GCS_PREFIX:prefix};
+ // A fresh emulator/job must not depend on a preceding Python test's bucket.
+ execFileSync(python,['-c',"import os;from logging_service.gcs import GCSSink;s=GCSSink(os.environ['GCS_BUCKET'],os.environ['GOOGLE_CLOUD_PROJECT']);s.client.create_bucket(s.bucket)"],{cwd:service,env,timeout:15000});
  const child=spawn(python,['-m','logging_service'],{cwd:service,env,stdio:['ignore','ignore','pipe']});let log='';child.stderr.on('data',b=>log+=b.toString());
  t.after(async()=>{if(child.exitCode===null){child.kill();await once(child,'exit');}});
  for(let i=0;;i++){try{if((await fetch(loggingUrl+'/health')).ok)break;}catch{}if(i===100)throw new Error(log);await new Promise(r=>setTimeout(r,50));}
