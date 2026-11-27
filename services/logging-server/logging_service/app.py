@@ -3,7 +3,8 @@ import hmac
 import json
 import logging
 import os
-from contextlib import asynccontextmanager
+import threading
+from contextlib import asynccontextmanager, closing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
@@ -36,12 +37,17 @@ class Settings:
     gcs_bucket: str = ""
     gcs_project: str | None = None
     gcs_prefix: str = ""
+    postgres_pool_enabled: bool = False
+    postgres_pool_size: int = 4
+    postgres_pool_timeout: float = 1.0
 
     def __post_init__(self):
         if len(self.token) < 24:
             raise ValueError("LOGGING_TOKEN_MIN_24_CHARS")
         if self.flush_ms < 100 or self.max_records < 1:
             raise ValueError("INVALID_LOGGING_LIMITS")
+        if not 1 <= self.postgres_pool_size <= 32 or not 0 < self.postgres_pool_timeout <= 5:
+            raise ValueError("INVALID_POSTGRES_POOL_LIMITS")
 
     @classmethod
     def environment(cls):
@@ -49,10 +55,15 @@ class Settings:
         url = os.environ.get("LOGGING_DATABASE_URL")
         if mode not in ("postgres", "sqlite") or (mode == "postgres" and not url):
             raise ValueError("LOGGING_DATABASE_URL_REQUIRED")
+        pooled = os.environ.get("LOGGING_POSTGRES_POOL_ENABLED", "false")
+        if pooled not in ("true", "false"):
+            raise ValueError("INVALID_POSTGRES_POOL_ENABLED")
         return cls(os.environ.get("LOGGING_TOKEN", ""), os.environ.get("LOGGING_DB", cls.database),
                    os.environ.get("LOGGING_EXPORT_DIR", cls.export_dir), int(os.environ.get("LOGGING_FLUSH_MS", "30000")),
                    int(os.environ.get("LOGGING_MAX_RECORDS", "100000")), url if mode == "postgres" else None,
-                   os.environ.get("GCS_BUCKET", ""), os.environ.get("GOOGLE_CLOUD_PROJECT"), os.environ.get("GCS_PREFIX", ""))
+                   os.environ.get("GCS_BUCKET", ""), os.environ.get("GOOGLE_CLOUD_PROJECT"), os.environ.get("GCS_PREFIX", ""),
+                   pooled == "true", int(os.environ.get("LOGGING_POSTGRES_POOL_SIZE", "4")),
+                   float(os.environ.get("LOGGING_POSTGRES_POOL_TIMEOUT", "1")))
 
 
 class Events(BaseModel):
@@ -158,13 +169,19 @@ def create_app(settings=None):
         worker = None
         try:
             if config.database_url:
-                from .postgres import PostgresStore
-                store = PostgresStore(config.database_url, initialize=True)
+                if config.postgres_pool_enabled:
+                    from .postgres_pool import PooledPostgresStore
+                    store = PooledPostgresStore(config.database_url, initialize=True,
+                        pool_size=config.postgres_pool_size, pool_timeout=config.postgres_pool_timeout)
+                else:
+                    from .postgres import PostgresStore
+                    store = PostgresStore(config.database_url, initialize=True)
                 exporter = None
             else:
                 store = Store(config.database)
                 exporter = Exporter(store, LocalSink(config.export_dir))
             app.state.config, app.state.store, app.state.exporter = config, store, exporter
+            app.state.deletion_slot = threading.BoundedSemaphore(1)
             app.state.loop, app.state.wake = asyncio.get_running_loop(), wake
 
             async def periodic():
@@ -310,6 +327,21 @@ def create_app(settings=None):
         if exporter is None:
             from .gcs import GCSSink
             config = request.app.state.config
+            if config.postgres_pool_enabled:
+                # Keep the export session lock on one dedicated connection across
+                # GCS calls; never return a session-locked connection to the pool.
+                from .postgres import PostgresStore
+                # Bound extra connections before opening one, including startup
+                # schema checks. Busy callers retry; do not queue more connections.
+                slot = request.app.state.deletion_slot
+                if not slot.acquire(blocking=False):
+                    raise HTTPException(503, "DELETE_BUSY", headers={"Retry-After": "1"})
+                try:
+                    with closing(PostgresStore(config.database_url)) as deletion_store:
+                        Exporter(deletion_store, GCSSink(config.gcs_bucket, config.gcs_project, config.gcs_prefix)).delete(body.reader_id)
+                finally:
+                    slot.release()
+                return {"deleted": True}
             exporter = Exporter(request.app.state.store, GCSSink(config.gcs_bucket, config.gcs_project, config.gcs_prefix))
         exporter.delete(body.reader_id)
         return {"deleted": True}

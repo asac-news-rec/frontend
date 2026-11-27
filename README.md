@@ -1,5 +1,8 @@
 # 마이뉴스 프론트엔드
 
+기존 로그 형식을 유지하는 PostgreSQL 연결 풀·독자별 잠금 선택 모드는
+[수집 동시성 개선](docs/logging-server/postgres-concurrency.md)을 참조하세요.
+
 ## CI 실행 범위
 
 로깅 CI는 PostgreSQL·GCS·HTTP 통합 검증과 브라우저 회귀 검증을 별도 작업으로 병렬 실행합니다.

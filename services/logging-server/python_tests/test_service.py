@@ -22,6 +22,25 @@ from logging_service.store import Store, partition
 TOKEN = "test-only-fastapi-logging-token-32"
 
 
+def test_postgres_pool_environment_is_explicit_and_bounded(monkeypatch):
+    monkeypatch.setenv("LOGGING_TOKEN", TOKEN)
+    monkeypatch.setenv("LOGGING_STORE", "postgres")
+    monkeypatch.setenv("LOGGING_DATABASE_URL", "postgresql://unused-test")
+    monkeypatch.delenv("LOGGING_POSTGRES_POOL_ENABLED", raising=False)
+    monkeypatch.delenv("LOGGING_POSTGRES_POOL_SIZE", raising=False)
+    monkeypatch.delenv("LOGGING_POSTGRES_POOL_TIMEOUT", raising=False)
+    assert Settings.environment().postgres_pool_enabled is False
+    monkeypatch.setenv("LOGGING_POSTGRES_POOL_ENABLED", "true")
+    assert Settings.environment().postgres_pool_enabled is True
+    for name, bad in [("LOGGING_POSTGRES_POOL_ENABLED", "yes"),
+                      ("LOGGING_POSTGRES_POOL_SIZE", "0"),
+                      ("LOGGING_POSTGRES_POOL_SIZE", "33"),
+                      ("LOGGING_POSTGRES_POOL_TIMEOUT", "nan")]:
+        with monkeypatch.context() as bad_config:
+            bad_config.setenv(name, bad)
+            with pytest.raises(ValueError): Settings.environment()
+
+
 def record(**changes):
     return dict(request_id="req-1", impression_id="imp-1", reader_id="reader-1", article_id="article-1", position=1,
                 served_at=iso(int(time.time() * 1000)), **changes)
