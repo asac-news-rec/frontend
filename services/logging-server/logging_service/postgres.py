@@ -132,7 +132,7 @@ class PostgresStore(Store):
     def prepare_exports(self, interval=None, interval_path=None):
         # Keep the export session lease (when called by Exporter), but release the
         # intake gate after each page so queued intake/deletion transactions run.
-        # Keyset pagination avoids rescanning all previously prepared members.
+        # Advance over raw candidates, including excluded/already exported rows.
         for stream in ("served", "actions"):
             after = ""
             while True:
@@ -146,28 +146,31 @@ class PostgresStore(Store):
     def _prepare_export_batch(self, stream, after, interval, interval_path):
         started = time.perf_counter()
         timings, count, jobs, failed = {"wait_ms": 0}, 0, 0, True
-        # These SQL fragments come only from this internal stream choice.
-        if stream == "served":
-            source, key, stamp = "served_records s", "s.impression_id", "s.served_at"
-            columns, received = "s.*", "s.received_at"
-        else:
-            source = "action_records a JOIN served_records s USING(impression_id)"
-            key, stamp, columns, received = "a.event_id", "a.event_time", "a.*,s.reader_id", "a.received_at"
-        bounds = f" AND {received}>=%s AND {received}<%s" if interval else ""
+        # Limit the raw PK page before eligibility filters. A sparse interval or
+        # mostly exported inbox must not scan the whole inbox under one gate.
+        table, key, stamp = (("served_records", "impression_id", "served_at") if stream == "served"
+                             else ("action_records", "event_id", "event_time"))
         try:
             with self.transaction(timings=timings):
                 rows = self.connection.execute(f"""
-                    SELECT {columns}, %s AS stream, {key} AS record_id, {stamp} AS time
-                    FROM {source}
-                    WHERE {key}>%s
-                      AND NOT EXISTS (SELECT 1 FROM revoked_users r WHERE r.reader_id=s.reader_id)
-                      AND NOT EXISTS (SELECT 1 FROM export_members m WHERE m.stream=%s AND m.record_id={key})
-                      {bounds}
+                    SELECT *, %s AS stream, {key} AS record_id, {stamp} AS time
+                    FROM {table} WHERE {key}>%s
                     ORDER BY {key} LIMIT %s
-                    """, (stream, after, stream, *(interval or ()), EXPORT_PREPARE_BATCH_SIZE)).fetchall()
+                    """, (stream, after, EXPORT_PREPARE_BATCH_SIZE)).fetchall()
                 count = len(rows)
+                eligible = [r for r in rows if not interval or interval[0] <= r["received_at"] < interval[1]]
+                if stream == "actions" and eligible:
+                    owners = self.get_many("served_records", "impression_id", (r["impression_id"] for r in eligible))
+                    for row in eligible:
+                        row["reader_id"] = owners[row["impression_id"]]["reader_id"]
+                revoked = self.get_many("revoked_users", "reader_id", (r["reader_id"] for r in eligible))
+                members = {r["record_id"] for r in self.connection.execute(
+                    "SELECT record_id FROM export_members WHERE stream=%s AND record_id=ANY(%s)",
+                    (stream, [r["record_id"] for r in eligible]))} if eligible else set()
                 groups = {}
-                for row in rows:
+                for row in eligible:
+                    if row["reader_id"] in revoked or row["record_id"] in members:
+                        continue
                     groups.setdefault((stream, row["reader_id"], interval_path or partition(row["time"])), []).append(row)
                 jobs = self._insert_export_groups(groups, interval_path)
             failed = False

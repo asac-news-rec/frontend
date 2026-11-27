@@ -9,6 +9,8 @@ import {createDevServer} from '../../.local/server/dev-http.js';
 import {startFastApiLogging} from '../helpers/fastapi-logging.mjs';
 
 test('page lifecycle preserves delivery and closes each tracked article once',async t=>{
+ // Close clients before the FIFO server/process teardown hooks.
+ let browser;t.after(async()=>{await browser?.close();});
  const token=randomUUID(),logging=await startFastApiLogging(t,token);
  const article={article_id:'a',title:'페이지 수명주기 시험',paragraphs:['가상 기사'],category:'사회',published_at:new Date().toISOString(),is_synthetic:true,is_liked:false};
  const backend=createServer((req,res)=>{
@@ -23,7 +25,7 @@ test('page lifecycle preserves delivery and closes each tracked article once',as
  backend.listen(0,'127.0.0.1');await once(backend,'listening');t.after(()=>new Promise(r=>backend.close(r)));
  const reserve=createServer();reserve.listen(0,'127.0.0.1');await once(reserve,'listening');const port=reserve.address().port;await new Promise(r=>reserve.close(r));const url=`http://127.0.0.1:${port}`;
  const web=createDevServer({root:fileURLToPath(new URL('../../',import.meta.url)),origin:url,backendBaseUrl:`http://127.0.0.1:${backend.address().port}`,logging:{url:logging.url,token}});web.listen(port,'127.0.0.1');await once(web,'listening');t.after(()=>new Promise(r=>web.close(r)));
- const browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:{})});t.after(()=>browser.close());const page=await browser.newPage();
+ browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:{})});const page=await browser.newPage();
  const deliveries=[];let release,held=false;const gate=new Promise(r=>release=r);t.after(()=>release());
  await page.route('**/api/behavior/events',async route=>{
   const event=route.request().postDataJSON().events[0];const response=await route.fetch();deliveries.push({event,ack:(await response.json()).results[0]});

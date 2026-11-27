@@ -8,6 +8,8 @@ import {chromium} from 'playwright';
 import {createDevServer} from '../../.local/server/dev-http.js';
 
 test('event auth failures recover the same session or retain and report the queue',async t=>{
+ // Close clients before the FIFO server/process teardown hooks.
+ let browser;t.after(async()=>{await browser?.close();});
  const token=randomUUID(),received=[];let issued=0;
  const listen=async server=>{server.listen(0,'127.0.0.1');await once(server,'listening');t.after(()=>new Promise(r=>server.close(r)));return `http://127.0.0.1:${server.address().port}`;};
  const logging=await listen(createServer(async(req,res)=>{const chunks=[];for await(const b of req)chunks.push(b);const body=JSON.parse(Buffer.concat(chunks).toString());if(body.events)received.push(...body.events);res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({results:(body.records??body.events).map(r=>({...('event_id' in r?{event_id:r.event_id}:{impression_id:r.impression_id}),status:'accepted'}))}));}));
@@ -15,7 +17,7 @@ test('event auth failures recover the same session or retain and report the queu
   res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify(payload));}));
  const reserve=createServer();reserve.listen(0,'127.0.0.1');await once(reserve,'listening');const port=reserve.address().port;await new Promise(r=>reserve.close(r));const url=`http://127.0.0.1:${port}`;
  const web=createDevServer({root:fileURLToPath(new URL('../../',import.meta.url)),origin:url,backendBaseUrl:backend,logging:{url:logging,token}});web.listen(port,'127.0.0.1');await once(web,'listening');t.after(()=>new Promise(r=>web.close(r)));
- const browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:{})});t.after(()=>browser.close());
+ browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:{})});
  async function fixture(){const context=await browser.newContext();const page=await context.newPage();const sent=[];let sessions=0;
   await page.addInitScript(()=>{globalThis.reports=[];document.addEventListener('behavior-queue-changed',event=>globalThis.reports.push(event.detail));});
   page.on('request',req=>{if(req.url().endsWith('/api/behavior/session'))sessions++;if(req.url().endsWith('/api/behavior/events')){const body=req.postDataJSON();sent.push(...body.events.filter(e=>e.event_type==='article_open'));}});

@@ -7,6 +7,8 @@ import {chromium} from 'playwright';
 import {createDevServer} from '../../.local/server/dev-http.js';
 
 test('본문 없는 v1 피드와 상세 직접 진입·경합·오류·좋아요를 실제 프록시로 검증한다',async t=>{
+ // Close clients before the FIFO server/process teardown hooks.
+ let browser;t.after(async()=>{await browser?.close();});
  let releaseA,releaseLike,releaseDetail,releaseFeed; t.after(()=>{releaseA?.();releaseLike?.();releaseDetail?.();releaseFeed?.();});
  const listen=async server=>{server.listen(0,'127.0.0.1');await once(server,'listening');t.after(()=>new Promise(r=>server.close(r)));return `http://127.0.0.1:${server.address().port}`;};
  const articles=Array.from({length:12},(_,i)=>({article_id:'a'+i,title:'상세 검증 기사 '+i,summary:'가상 테스트 기사',category:'사회',published_at:'2026-11-20T00:00:00Z',is_synthetic:true,is_liked:false}));
@@ -33,7 +35,7 @@ test('본문 없는 v1 피드와 상세 직접 진입·경합·오류·좋아요
  const origin=`http://127.0.0.1:${port}`;
  const web=createDevServer({root:fileURLToPath(new URL('../../',import.meta.url)),origin,backendBaseUrl:backend});
  web.listen(port,'127.0.0.1');await once(web,'listening');t.after(()=>new Promise(r=>web.close(r)));
- const browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:{})});t.after(()=>browser.close());
+ browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:{})});
  const page=await browser.newPage();page.setDefaultTimeout(7000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto(origin);await page.locator('a.card').first().waitFor();
  await page.getByRole('button',{name:'사회',exact:true}).click();await page.locator('#subcategory').selectOption({label:'교육'});await page.locator('a.card').first().waitFor();

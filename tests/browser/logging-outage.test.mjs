@@ -8,6 +8,8 @@ import {chromium} from 'playwright';
 import {createDevServer} from '../../.local/server/dev-http.js';
 
 test('logging failures disable collection while feed, detail, pagination and likes remain usable',async t=>{
+ // Close clients before the FIFO server/process teardown hooks.
+ let browser;t.after(async()=>{await browser?.close();});
  const listen=async server=>{server.listen(0,'127.0.0.1');await once(server,'listening');t.after(()=>new Promise(resolve=>server.close(resolve)));return `http://127.0.0.1:${server.address().port}`;};
  let mode='',eventRequests=0,reader=0;const feeds=[],likes=[];
  const logging=await listen(createServer(async(req,res)=>{
@@ -34,7 +36,7 @@ test('logging failures disable collection while feed, detail, pagination and lik
  const reservation=createServer();reservation.listen(0,'127.0.0.1');await once(reservation,'listening');const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
  const url=`http://127.0.0.1:${port}`;const web=createDevServer({root:fileURLToPath(new URL('../../',import.meta.url)),origin:url,backendBaseUrl:backend,logging:{url:logging,token:randomUUID()}});
  web.listen(port,'127.0.0.1');await once(web,'listening');t.after(()=>new Promise(resolve=>web.close(resolve)));
- const browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:{})});t.after(()=>browser.close());
+ browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:{})});
  for(const failure of ['status-503','status-network','session-503','session-invalid','served-503','served-connection-lost','served-timeout'])await t.test(failure,async()=>{
   mode=failure;const beforeEvents=eventRequests,firstFeed=feeds.length,firstLike=likes.length;
   const context=await browser.newContext();try{

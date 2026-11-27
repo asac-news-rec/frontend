@@ -111,8 +111,9 @@ Airflow `export_behavior_logs.upload`가 시작됐고 수집 연결 4개가 공�
 PostgreSQL `prepare_exports`는 이제 스트림별 최대 **500행**을 한 트랜잭션으로 준비합니다.
 기존 API/삭제와 같은 배타 INTAKE 잠금 안에서 다음 작업을 수행한 뒤 커밋하고 잠금을 반환합니다.
 
-- 레코드 ID 순서의 keyset 조회와 `LIMIT`으로 준비할 행 수를 제한합니다.
-- 철회 여부와 기존 export membership을 `NOT EXISTS`로 함께 확인합니다. 행별 철회 조회를 제거합니다.
+- 레코드 ID 순서의 keyset 조회로 **필터 적용 전 원본 500행**을 가져옵니다.
+- 이 후보 안에서 수신 구간을 검사하고, 소유자·철회·membership을 일괄 조회합니다.
+- 적격 행이 0개인 배치도 마지막 원본 ID로 진행합니다. 종료 조건은 적격 행 수가 아닌 원본 후보 수입니다.
 - JSONL과 작업 목록을 만들고 job/member를 각각 일괄 삽입합니다. 두 목록은 함께 커밋하거나 함께 롤백합니다.
 
 다음 배치는 새 트랜잭션으로 철회와 membership을 다시 확인합니다. 중간 실패 시 앞서 커밋한
@@ -123,16 +124,42 @@ job/object 이름은 유지되며, 재시도는 membership이 없는 행만 준�
 500행은 **건수 제한이며 시간 제한은 아닙니다.** SQL 검색·정렬, JSON 변환과 커밋도 배치 안에
 있으므로 운영 DB에서 잠금 시간이 1초 이내라고 보장하지 않습니다. 정리(prune)의 트랜잭션과
 수집의 최종 용량 잠금은 이번 변경 대상이 아닙니다. SQLite export의 트랜잭션 범위는 유지합니다.
+전체 flush는 여전히 원본을 순회하므로 구간 밖/기존 membership이 많은 경우 왕복 횟수가 늘어납니다.
+각 SQL의 실행 계획·dead tuple·디스크 I/O에 따라 물리적 조회량과 시간은 달라집니다.
+
+2026-11-27 로컬 PostgreSQL에서 가상 served 100,000행, 기존 membership 99,999행을 넣고
+ANALYZE 후 `EXPLAIN (ANALYZE, BUFFERS)`로 비교했습니다. 기존 필터 후 LIMIT 쿼리는
+원본 Seq Scan 100,000행 + membership index probe 100,000회로 1행을 반환(396.634ms)했습니다.
+수정 쿼리의 첫 원본 페이지는 PK Index Scan 500행(0.577ms), 그 500개 membership 조회는
+Index Only Scan 500행(1.513ms)이었습니다. 반대로 빈 수신 구간에서는 기존 received_at
+인덱스가 0행을 즉시 반환(0.064ms)하므로 새 방식이 모든 경우의 총 처리량 개선은 아닙니다.
+이는 독립 로컬 DB의 단일 실행 SQL 시간이며 JSON/삽입/커밋을 포함한 잠금 시간이나 운영 성능이 아닙니다.
 
 JSONL 필드·gzip·manifest 형식은 유지하지만 한 독자의 레코드가 여러 배치에 나뉘면 파일 수가
-늘어날 수 있습니다. 종료된 Airflow 수신 시각 구간은 모든 적격 행을 순회합니다. 구간 없는
-flush 중 새로 들어와 이미 지난 ID 위치에 놓인 행은 다음 flush에서 처리합니다.
+늘어날 수 있습니다. 구간 없는 flush 중 이미 지난 ID 위치에 들어온 행은 다음 flush에서 처리합니다.
+종료된 Airflow 구간 `[start,end)`은 수집 서버가 INTAKE gate를 획득한 뒤 부여하는 `received_at`을
+기준으로 합니다. 시계가 정상이고 end 이후 실행한다면 새 수신은 다음 구간에 속하며, 먼저
+시작한 수집은 exporter의 첫 배타 gate 획득 전에 커밋됩니다. 철회·삭제는 후보를 줄일 뿐
+이미 순회한 ID에 적격 레코드를 추가하지 않습니다.
+
+이 보장은 시계 역행·서버 간 시계 오차·과거 received_at 직접 삽입에는 적용되지 않습니다.
+그런 행이 커서 뒤에 삽입되면 기존 구간 재실행이 필요하며 이 패키지는 과거 Airflow 구간을
+자동 재예약하지 않습니다. membership 때문에 같은 구간 재실행은 기존 job을 중복 생성하지 않습니다.
+회귀 테스트는 커서 뒤 신규 수신의 다음 구간 처리와 의도적으로 과거 시각을 부여한 행의
+원래 구간 재실행을 각각 검증합니다.
+
+job만 커밋되면 재시도 시 membership이 없어 같은 원본의 새 job이 생성될 수 있으므로
+job/member 삽입은 반드시 같은 트랜잭션입니다. 실제 중복 키 오류를 member 삽입에 주입해
+두 목록 모두 0건으로 롤백되고 재시도되는 것을 SQLite/PostgreSQL에서 검증합니다.
+독립된 두 prepare 호출도 PostgreSQL 배타 gate 및 SQLite BEGIN IMMEDIATE로 직렬화됩니다.
+두 구현의 동시 호출 테스트를 추가했으며, PostgreSQL만 배치별 커밋/부분 실패 복구를 검증합니다.
 
 `logging_export_prepare_batch`는 `stream`, `rows`, `jobs`, `total_ms`, `wait_ms`, `work_ms`,
 `failed`를 기록합니다. 일반 배치는 INFO, 실패 또는 500ms 이상은 WARNING입니다. INFO를
 수집하지 않는 환경에서는 느린 배치와 실패만 보입니다. 독자 ID·이벤트 내용은 기록하지 않습니다.
 wait는 프로세스 잠금/연결 복구와 DB 잠금 획득 왕복을 포함하고, work는 조회·JSON·삽입·커밋/
-롤백을 포함합니다. 실패 배치의 rows/jobs는 시도한 수이며 커밋 건수가 아닙니다.
+롤백을 포함합니다. rows는 필터 전 후보 수, jobs는 생성 시도한 작업 수입니다.
+실패 배치의 rows/jobs는 커밋 건수가 아닙니다.
 
 **배포 순서:** PR 머지만으로 운영 Airflow가 새 패키지를 쓰는 것은 아닙니다. 인프라 담당자가
 Airflow worker 이미지/설치 경로의 `logging_service`를 이 변경 커밋으로 업데이트하고 실제
