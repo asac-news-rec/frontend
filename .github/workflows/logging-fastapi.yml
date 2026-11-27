@@ -110,8 +110,7 @@ jobs:
       - run: python -m pip install -r services/logging-server/requirements-dev.txt
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: npm run build:local
-      - run: node --test --test-timeout=120000 tests/browser/*.test.mjs
+      - run: npm run test:browser
 
   test:
     name: test
@@ -120,20 +119,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
       - name: Require every applicable check
         env:
           SCOPE_RESULT: ${{ needs.scope.result }}
           INTEGRATION_RESULT: ${{ needs.integration.result }}
           BROWSER_REQUIRED: ${{ needs.scope.outputs.browser }}
           BROWSER_RESULT: ${{ needs.browser.result }}
-        run: |
-          test "$SCOPE_RESULT" = success
-          test "$INTEGRATION_RESULT" = success
-          if [ "$BROWSER_REQUIRED" = true ]; then
-            test "$BROWSER_RESULT" = success
-          else
-            test "$BROWSER_RESULT" = skipped
-          fi
+        run: node scripts/ci-check-gate.mjs
 
   deploy:
     name: Deploy logging FastAPI to Cloud Run

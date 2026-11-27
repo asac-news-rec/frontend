@@ -6,8 +6,7 @@ import {fileURLToPath} from 'node:url';
 export function needsBrowser(paths) {
  return paths.some(path => !(
   path.startsWith('docs/') || /^(README|AGENTS|CLAUDE|CONTRIBUTING)\.md$/.test(path) ||
-  path.startsWith('services/logging-server/python_tests/') ||
-  /^services\/logging-server\/logging_service\/(postgres|postgres_pool)\.(py|sql)$/.test(path)
+  path.startsWith('services/logging-server/python_tests/')
  ));
 }
 
